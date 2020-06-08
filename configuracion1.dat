@@ -1,0 +1,68 @@
+######################################################################
+#                                                                    #
+#                                ZAP2                                #
+#                           CONFIGURACIÓN 1                          #
+#                                                                    #
+######################################################################
+
+######################################################################
+#                             GEOMETRÍA                              #
+#                                                                    #
+#               S : Superficie alar (m2)                             #
+#               c : Cuerda media aerodinámica (m)                    #
+#               b : Envergadura (m)                                  #
+                                                                         
+                S : 153.0                                                
+                c : 4.64                                                 
+                b : 33.0                                                 
+                                                                     
+######################################################################
+#                             PROPULSIÓN                             #
+#                                                                    #
+#               T : Empuje de cada motor (N)                         #
+#         epsilon : Ángulo de ataque de cada motor (grados)          #
+#              ni : Ángulo de resbalamiento de cada motor (grados)   #
+#          d_CG_x : Distancia X de cada motor al CG (m)              #
+#          d_CG_y : Distancia Y de cada motor al CG (m)              #
+#          d_CG_z : Distancia Z de cada motor al CG (m)              #
+      
+                T : 231000.0
+          epsilon : 0.0
+               ni : 0.0
+           d_CG_x : -20.0
+           d_CG_y : 0.0
+           d_CG_z :-3.0
+	   
+######################################################################
+#                            AERODINÁMICA                            #
+#                                                                    #
+#            cl_0 : Coeficiente de balance inicial(-)                #
+#         cl_beta : Efecto diedro                                    #
+#      cl_delta_a : Potencia de control lateral (-)                  #
+#      cl_delta_r : Coeficiente de momento de balance respecto       #
+#                   a delta_r (-)                                    #
+#                                                                    #
+#            cm_0 : Coeficiente de momemto inicial(-)                #
+#        cm_alpha : Coeficiente de estabilidad estática              #
+#                   longitudinal con mandos fijos (-)                #
+#      cm_delta_e : Potencia de control longitudinal (-)             #
+#                                                                    #
+#            cn_0 : Coeficiente de guiñada inicial (-)               #
+#         cn_beta : Coeficiente de estabilidad direccional (-)       #
+#      cn_delta_a : Coeficiente de guiñada adversa (-)               #
+#      cn_delta_r : Potencia de control direccional (-)              #
+      
+             cl_0 : 
+          cl_beta : 
+       cl_delta_a : 
+       cl_delta_r : 
+             
+             cm_0 : -0.042
+         cm_alpha : -1.5
+       cm_delta_e : -1.3
+             
+             cn_0 : 
+          cn_beta : 
+       cn_delta_a : 
+       cn_delta_r : 
+

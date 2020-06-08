@@ -1,0 +1,28 @@
+######################################################################
+#                            INPUT DATA                              #
+#                                                                    #
+#              aircraft : Dirección del ADF                          #
+#                                                                    #
+#               altitud : Vector de altitudes de vuelo (ft)          #
+#                     V : Vector de velocidades de vuelo (kt)        #
+#                                                                    #
+#               delta_e : Ángulo de deflexión del elevador (grados)  #
+#               delta_a : Ángulo de deflexión del alerón(grados)     #
+#               delta_r : Ángulo de deflexión del ruder (grados)     #
+#                                                                    #
+#                  type : Tipo de análisis                           #
+#                         1 : Estático - Longitudinal                #
+#                         2 : Estático - Lateral-Direccional         #
+#                         3 : Dinámico - Longitudinal                #
+#                         4 : Dinámico - Lateral-Direccional         #
+
+               aircraft : configuracion1.txt
+
+                altitud : 20000.0
+                      V : 250.0
+
+                delta_e : 0.0
+                delta_a : 0.0
+                delta_r : 0.0
+
+                   type : 1
