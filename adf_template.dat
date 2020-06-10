@@ -1,0 +1,76 @@
+######################################################################
+#                                                                    #
+#                            AIRCRAFT NAME                           #
+#                           CONFIGURATION X                          #
+#                              LOW SPEED                             #
+#                                                                    #
+######################################################################
+
+######################################################################
+#                              GEOMETRY                              #
+#                                                                    #
+#               S : Wing surface (m2)                                #
+#               c : Mean aerodynamic chord (m)                       #
+#               b : Wingspan (m)                                     #
+#                                                                    #
+#              Ix : Moment of inertia about X axis (kg*m2)           #
+#              Iy : Moment of inertia about Y axis (kg*m2)           #
+#              Iz : Moment of inertia about Z axis (kg*m2)           #
+#             Jxz : Product of inertia about XZ axes (kg*m2)         #
+
+                S : 153.0
+                c : 4.64
+                b : 33.0
+
+               Ix : 0.0
+               Iy : 0.0
+               Iz : 0.0
+              Jxz : 0.0
+
+######################################################################
+#                             PROPULSION                             #
+#                                                                    #
+#               T : Engine thrust (N)                                #
+#         epsilon : Engine angle of atack (deg)                      #
+#              ni : Engine sideslip angle (deg)                      #
+#          d_CG_x : X distance to the CG (m)                         #
+#          d_CG_y : Y distance to the CG (m)                         #
+#          d_CG_z : Z distance to the CG (m)                         #
+
+                T : 231000.0
+          epsilon : 0.0
+               ni : 0.0
+           d_CG_x : -20.0
+           d_CG_y : 0.0
+           d_CG_z :-3.0
+
+######################################################################
+#                            AERODYNAMICS                            #
+#                                                                    #
+#            cl_0 : Initial rolling moment coefficient(-)            #
+#         cl_beta : Dihedral effect (-)                              #
+#      cl_delta_a : Lateral control power (-)                        #
+#      cl_delta_r : Rolling moment coefficient due to delta_r (-)    #
+#                                                                    #
+#            cm_0 : Initial pitching moment(-)                       #
+#        cm_alpha : Longitudinal stability coefficient (-)           #
+#      cm_delta_e : Longitudinal control power (-)                   #
+#                                                                    #
+#            cn_0 : Initial yawing moment (-)                        #
+#         cn_beta : Directional stability coefficient (-)            #
+#      cn_delta_a : Adverse yaw coefficient (-)                      #
+#      cn_delta_r : Directional control power (-)                    #
+
+             cl_0 : 0.0
+          cl_beta : -0.221
+       cl_delta_a : 0.0461
+       cl_delta_r : 0.007
+
+             cm_0 : -0.042
+         cm_alpha : -1.5
+       cm_delta_e : -1.3
+
+             cn_0 : 0.0
+          cn_beta : 0.150
+       cn_delta_a : 0.0064
+       cn_delta_r : -0.109
