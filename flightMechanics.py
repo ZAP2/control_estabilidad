@@ -28,13 +28,13 @@ def read_input_file(file):
     input_data = {}   
     for index, title in enumerate(variable_name):    
         if title == 'aircraft':
-            input_data[title] = variable_data[index]
+            input_data[title] = variable_data[index][0]
         elif title == 'type':
             input_data[title] = np.array([int(var) for var in variable_data[index]])
         else:
             input_data[title] = np.array([float(var) for var in variable_data[index]])
                 
-    adf_data = read_adf_file(input_data['aircraft'][0])
+    adf_data = read_adf_file(input_data['aircraft'])
     
     return input_data, adf_data
 
@@ -220,6 +220,68 @@ def calculate_static_latdir(S, b, Ix, Iy, Iz, Jxz, p, q, r, pp, qq, rr,
 
     return delta_a, delta_r
 
+def plot_out_static(out_data):
+    """ 
+    This function plot the calculated outputs
+    
+    Inputs:
+        out_data: Dictionary containing the results
+        
+    Outputs:
+        plots
+    
+    """  
+
+    for alt in np.unique(out_data['altitude']): # Plot for each altitude
+        condition_alt = out_data['altitude'] == alt
+        for spd in np.unique(out_data['V']):    # Plot for each speed
+            condition_spd = out_data['V'] == spd
+            
+            condition = np.logical_and(condition_alt, condition_spd)
+            
+            fig, ax1 = plt.subplots()
+            
+            # Longitudinal
+            if out_data['type'] == 1: 
+                alpha   = np.extract(condition, out_data['alpha'])
+                delta_e = np.extract(condition, out_data['delta_e'])
+                                             
+                fig_name = out_data['file'][:-4] + '_alt' + str(int(alt)) + '_spd' + str(int(spd)) + '.png'
+                xl  = 'Alpha (deg)'
+                yl  = 'Elevator deflection (deg)'
+                tit = 'Altitude: ' + str(int(alt)) + ' ft\n' + 'Speed: ' + str(int(spd)) + ' kt'
+                
+                ax1.plot(alpha, delta_e)
+                
+                ax1.set(xlabel = xl, ylabel = yl, title = tit)
+                ax1.grid()
+                
+                fig.tight_layout()
+                fig.savefig(fig_name)
+                plt.show()
+                
+            # Lateral-directional
+            if out_data['type'] == 2: 
+                beta    = np.extract(condition, out_data['beta'])
+                delta_a = np.extract(condition, out_data['delta_a'])
+                delta_r = np.extract(condition, out_data['delta_r'])
+                
+                fig_name = out_data['file'][:-4] + '_alt' + str(int(alt)) + '_spd' + str(int(spd)) + '.png'
+                xl  = 'Beta (deg)'
+                yl  = 'Control deflection (deg)'
+                tit = 'Altitude: ' + str(int(alt)) + ' ft\n' + 'Speed: ' + str(int(spd)) + ' kt'
+                
+                ax1.plot(beta, delta_a, color = 'tab:blue', label = 'Aileron')
+                ax1.plot(beta, delta_r, color = 'tab:red', label = 'Rudder')
+                
+                ax1.set(xlabel = xl, ylabel = yl, title = tit)
+                ax1.grid()
+                ax1.legend(loc='best')
+                
+                fig.tight_layout()
+                fig.savefig(fig_name)
+                plt.show()
+        
 """
 MAIN PROGRAM
 
@@ -239,7 +301,8 @@ deg_to_rad = math.pi / 180.0
 g = 9.80665
 
 # Define input file path
-file = 'static_latdir.dat'
+#file = './longitudinal/static_long.dat'
+file = './lateral-directional/static_latdir.dat'
 
 # Read input and aircraft data
 input_data, adf_data = read_input_file(file)
@@ -265,13 +328,15 @@ for key,val in adf_data.items():
 if input_data['type'] == 1 or input_data['type'] == 2:
     
     # Initialize output dictionary
-    variable_name = []
+    variable_name = ['file']
     for key, val in input_data.items():
-        if key != 'type':
-            variable_name.append(key)
+        variable_name.append(key)
     variable_name = variable_name + ['delta_e', 'delta_a', 'delta_r']
     out_data = dict([(key, []) for key in variable_name])
+    
+    out_data['file']     = file[:-4] + '.out'
     out_data['aircraft'] = input_data['aircraft']
+    out_data['type']     = input_data['type']
     
     # Calculate    
     for alt in altitude:    # Scan altitude array
@@ -322,14 +387,17 @@ if input_data['type'] == 1 or input_data['type'] == 2:
 else:
     print('Dynamic stability and control not available for calculation')
     
+    
+           
 # Print results
 if input_data['type'] == 1 or input_data['type'] == 2: # Static    
     print_out_static(out_data)
 else # Dynamic
     print('Dynamic stability and control not available for printing')
 
+
 # Plot results
 if input_data['type'] == 1 or input_data['type'] == 2: # Static    
     plot_out_static(out_data)
-else # Dynamic
+else: # Dynamic
     print('Dynamic stability and control not available for plotting')
