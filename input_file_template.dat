@@ -1,0 +1,42 @@
+######################################################################
+#                            INPUT DATA                              #
+#                                                                    #
+#              aircraft : Path to the ADF                            #
+#                                                                    #
+#              altitude : Flight altitude (ft)                       #
+#                     V : Speed (kt)                                 #
+#                                                                    #
+#                  type : Type of analysis                           #
+#                         1 : Static - Longitudinal                  #
+#                         2 : Static - Lateral-Directional           #
+#                         3 : Dynamic - Longitudinal                 #
+#                         4 : Dynamic - Lateral-Directional          #
+#                                                                    #
+#                 alpha : Angle of atack (deg)                       #
+#                  beta : Sideslip angle (deg)                       #
+#                                                                    #
+#                     p : Angular velocity X (rad/s)                 #
+#                     q : Angular velocity Y (rad/s)                 #
+#                     r : Angular velocity Z (rad/s)                 #
+#                                                                    #
+#                    pp : Angular acceleration X (rad/s2)            #
+#                    qq : Angular acceleration Y (rad/s2)            #
+#                    rr : Angular acceleration Z (rad/s2)            #
+
+               aircraft : adf_template.dat
+
+                   type : 1
+
+               altitude : 20000.0
+                      V : 250.0
+
+                  alpha : -5.0, 0.0, 5.0, 10.0
+                   beta : 0.0
+
+                      p : 0.0
+                      q : 0.0
+                      r : 0.0
+
+                     pp : 0.0
+                     qq : 0.0
+                     rr : 0.0
