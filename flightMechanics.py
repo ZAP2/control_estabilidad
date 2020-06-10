@@ -4,6 +4,7 @@
 
 import math
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 def read_input_file(file):
@@ -236,4 +237,99 @@ feet_to_meters = 0.3048
 kt_to_ms = 0.514444
 deg_to_rad = math.pi / 180.0
 g = 9.80665
+
+# Define input file path
+file = 'static_latdir.dat'
+
+# Read input and aircraft data
+input_data, adf_data = read_input_file(file)
+
+# Check alpha and beta input values
+if input_data['type'] == 1 and (len(input_data['beta']) > 1 or input_data['beta'][0] != 0):
+    print('Longitudinal study: beta should be zero')
+    print('Setting beta as 0 deg')
+    input_data['beta'] = np.array([0.0])
+if input_data['type'] == 2 and len(input_data['alpha']) > 1:
+    print('Lateral dirctional study: alpha should be constant, an array is not allowed')
+    print('Setting alpha as alpha[0]')
+    input_data['alpha'] = np.array([input_data['alpha'][0]])
+
+for key,val in input_data.items():
+        exec(key + '=val')
+for key,val in adf_data.items():
+        exec(key + '=val')
+
+# Calculate stability and control
+
+# Static
+if input_data['type'] == 1 or input_data['type'] == 2:
     
+    # Initialize output dictionary
+    variable_name = []
+    for key, val in input_data.items():
+        if key != 'type':
+            variable_name.append(key)
+    variable_name = variable_name + ['delta_e', 'delta_a', 'delta_r']
+    out_data = dict([(key, []) for key in variable_name])
+    out_data['aircraft'] = input_data['aircraft']
+    
+    # Calculate    
+    for alt in altitude:    # Scan altitude array
+        for spd in V:       # Scan speed array
+            
+            # Static - longitudinal
+            if input_data['type'] == 1:
+                for alpha_ in alpha: # Scan alpha array
+                    delta_e = calculate_static_long(S, c, Ix, Iy, Iz, Jxz, p, q, r, pp, qq, rr,
+                                                    T, epsilon, ni, d_CG_x, d_CG_y, d_CG_z,
+                                                    alt, spd, cm_0, cm_alpha, cm_delta_e, alpha_)
+                    
+                    out_data['altitude'] = np.append(out_data['altitude'], alt)
+                    out_data['V']        = np.append(out_data['V'], spd)
+                    out_data['alpha']    = np.append(out_data['alpha'], alpha_)
+                    out_data['beta']     = np.append(out_data['beta'], input_data['beta'][0])
+                    out_data['delta_e']  = np.append(out_data['delta_e'], delta_e[0])
+                    out_data['delta_a']  = np.append(out_data['delta_a'], 0.0)
+                    out_data['delta_r']  = np.append(out_data['delta_r'], 0.0)
+                    
+            # Static - lateral-directional   
+            elif input_data['type'] == 2:
+                for beta_ in beta:  # Scan beta array
+                    delta_a, delta_r = calculate_static_latdir(S, b, Ix, Iy, Iz, Jxz, p, q, r, pp, qq, rr,
+                                                               T, epsilon, ni, d_CG_x, d_CG_y, d_CG_z, alt, spd,
+                                                               cl_0, cl_beta, cl_delta_a, cl_delta_r,
+                                                               cn_0, cn_beta, cn_delta_a, cn_delta_r,
+                                                               beta_)
+                    
+                    out_data['altitude'] = np.append(out_data['altitude'], alt)
+                    out_data['V']        = np.append(out_data['V'], spd)
+                    out_data['alpha']    = np.append(out_data['alpha'], input_data['alpha'][0])
+                    out_data['beta']     = np.append(out_data['beta'], beta_)
+                    out_data['delta_e']  = np.append(out_data['delta_e'], 0.0)
+                    out_data['delta_a']  = np.append(out_data['delta_a'], delta_a[0])
+                    out_data['delta_r']  = np.append(out_data['delta_r'], delta_r[0])
+            
+    # Compete dictionary with constant variables            
+    n_cases = len(out_data['altitude'])
+    out_data['p']  = np.ones(n_cases) * input_data['p']
+    out_data['q']  = np.ones(n_cases) * input_data['q']
+    out_data['r']  = np.ones(n_cases) * input_data['r']
+    out_data['pp'] = np.ones(n_cases) * input_data['pp']
+    out_data['qq'] = np.ones(n_cases) * input_data['qq']
+    out_data['rr'] = np.ones(n_cases) * input_data['rr']
+
+# Dynamic - TO DO   
+else:
+    print('Dynamic stability and control not available for calculation')
+    
+# Print results
+if input_data['type'] == 1 or input_data['type'] == 2: # Static    
+    print_out_static(out_data)
+else # Dynamic
+    print('Dynamic stability and control not available for printing')
+
+# Plot results
+if input_data['type'] == 1 or input_data['type'] == 2: # Static    
+    plot_out_static(out_data)
+else # Dynamic
+    print('Dynamic stability and control not available for plotting')
