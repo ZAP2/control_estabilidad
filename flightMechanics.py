@@ -392,7 +392,7 @@ else:
 # Print results
 if input_data['type'] == 1 or input_data['type'] == 2: # Static    
     print_out_static(out_data)
-else # Dynamic
+else: # Dynamic
     print('Dynamic stability and control not available for printing')
 
 
