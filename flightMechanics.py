@@ -296,6 +296,7 @@ def output_file(out_data):
     variables = ['altitude',     'V',     'p',     'q',     'r',     'pp',     'qq',     'rr', 'alpha', 'beta', 'delta_e', 'delta_a', 'delta_r']
     header    = ['Altitude', 'Speed',     'p',     'q',     'r',     'pp',     'qq',     'rr', 'Alpha', 'Beta', 'Delta_e', 'Delta_a', 'Delta_r']
     units     = [      'ft',    'kt', 'rad/s', 'rad/s', 'rad/s', 'rad/s2', 'rad/s2', 'rad/s2',   'deg',  'deg',     'deg',     'deg',     'deg']
+    separation= ['--------', '-----', '-----', '-----', '-----', '------', '------', '------', '-----', '----', '-------', '-------', '-------']
 
     n_var = len(variables)
     n_row = len(out_data['altitude'])
@@ -315,6 +316,12 @@ def output_file(out_data):
         #Units  
         string = ['{:>11s}'.format(s) for s in units]
         string = ''.join(string) + '\n'
+        f.write(string)
+
+        #separation
+        string = ['{:>11s}'.format(s) for s in separation]
+        string = ''.join(string) + '\n'
+        #string = '-' * 11 * n_var + '\n'
         f.write(string)
 
         #variables
