@@ -318,7 +318,7 @@ def output_file(out_data):
         f.write(string)
 
         #variables
-        for i in range(n_var):
+        for i in range(n_row):
             string = [out_data[var][i] for var in variables]
             string = ['{:>11.3f}'.format(s) for s in string]
             string = ''.join(string) + '\n'
