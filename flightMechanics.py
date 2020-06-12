@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def read_input_file(file):
+def read_input_file(file): 
     """ 
     This function reads the input file into a dict
     
@@ -281,7 +281,57 @@ def plot_out_static(out_data):
                 fig.tight_layout()
                 fig.savefig(fig_name)
                 plt.show()
-        
+
+def output_file(out_data):
+    """ 
+    this function writes an output file
+    ​
+    Inputs: 
+    out_data: dictionary with the variables already calculated
+    ​
+    Outputs:
+    output_file: file.txt  with the study results
+    ​
+    """
+    variables = ['altitude',     'V',     'p',     'q',     'r',     'pp',     'qq',     'rr', 'alpha', 'beta', 'delta_e', 'delta_a', 'delta_r']
+    header    = ['Altitude', 'Speed',     'p',     'q',     'r',     'pp',     'qq',     'rr', 'Alpha', 'Beta', 'Delta_e', 'Delta_a', 'Delta_r']
+    units     = [      'ft',    'kt', 'rad/s', 'rad/s', 'rad/s', 'rad/s2', 'rad/s2', 'rad/s2',   'deg',  'deg',     'deg',     'deg',     'deg']
+    separation= ['--------', '-----', '-----', '-----', '-----', '------', '------', '------', '-----', '----', '-------', '-------', '-------']
+
+    n_var = len(variables)
+    n_row = len(out_data['altitude'])
+
+    with open(out_data['file'], "w") as f:
+
+        f.write("\n")
+
+        f.write("Aircraft: " + out_data["aircraft"]) #escribir 'titulo' indicando el avion que es
+        f.write("\n"*3)
+
+        # Headers
+        string = ['{:>11s}'.format(s) for s in header]
+        string = ''.join(string) + '\n'
+        f.write(string) 
+
+        #Units  
+        string = ['{:>11s}'.format(s) for s in units]
+        string = ''.join(string) + '\n'
+        f.write(string)
+
+        #separation
+        string = ['{:>11s}'.format(s) for s in separation]
+        string = ''.join(string) + '\n'
+        #string = '-' * 11 * n_var + '\n'
+        f.write(string)
+
+        #variables
+        for i in range(n_row):
+            string = [out_data[var][i] for var in variables]
+            string = ['{:>11.3f}'.format(s) for s in string]
+            string = ''.join(string) + '\n'
+            f.write(string)
+
+
 """
 MAIN PROGRAM
 
@@ -302,7 +352,7 @@ g = 9.80665
 
 # Define input file path
 #file = './longitudinal/static_long.dat'
-file = './lateral-directional/static_latdir.dat'
+file = 'input_file_template.dat'
 
 # Read input and aircraft data
 input_data, adf_data = read_input_file(file)
@@ -388,16 +438,15 @@ else:
     print('Dynamic stability and control not available for calculation')
     
     
-           
-# Print results
-if input_data['type'] == 1 or input_data['type'] == 2: # Static    
-    print_out_static(out_data)
-else: # Dynamic
-    print('Dynamic stability and control not available for printing')
-
-
 # Plot results
 if input_data['type'] == 1 or input_data['type'] == 2: # Static    
     plot_out_static(out_data)
 else: # Dynamic
     print('Dynamic stability and control not available for plotting')
+
+
+# Print results (output_file)
+if input_data['type'] == 1 or input_data['type'] == 2: # Static    
+    output_file(out_data)
+else: # Dynamic
+    print('Dynamic stability and control not available for printing')
