@@ -1,13 +1,13 @@
+# -*- coding: utf-8 -*-
 """
    FLIGHT MECHANICS
 """
-
 import math
 import numpy as np
 import matplotlib.pyplot as plt
 
 
-def read_input_file(file): 
+def read_input_file(file):
     """ 
     This function reads the input file into a dict
     
@@ -30,7 +30,7 @@ def read_input_file(file):
         if title == 'aircraft':
             input_data[title] = variable_data[index][0]
         elif title == 'type':
-            input_data[title] = np.array([int(var) for var in variable_data[index]])
+            input_data[title] = np.array([int(var) for var in variable_data[index]])[0]
         else:
             input_data[title] = np.array([float(var) for var in variable_data[index]])
                 
@@ -54,12 +54,52 @@ def read_adf_file(file):
         
     variable_name = [line[0].strip() for line in lines]
     variable_data = [[float(var) for var in line[1].replace(" ","").split(',')] for line in lines]
-    
+
     adf_data = {}      
     for index, title in enumerate(variable_name):
-        adf_data[title] = np.array(variable_data[index])
+        if (title == 'T' or title == 'epsilon' or title == 'ni' or 
+            title == 'd_CG_x' or title == 'd_CG_y' or title == 'd_CG_z'):
+            adf_data[title] = np.array(variable_data[index])
+        else:
+            adf_data[title] = np.array(variable_data[index])[0]
+    
+    # Get speed in Mach and KTAS
+    a = get_speed_of_sound(feet_to_meters * adf_data['altitude'])
+    if adf_data['speed'] < 5.0 :
+        adf_data['Mach'] = adf_data['speed']
+        adf_data['KTAS'] = (adf_data['Mach'] * a) / kt_to_ms
+    else:
+        adf_data['KTAS'] = adf_data['speed']
+        adf_data['Mach'] = (kt_to_ms * adf_data['KTAS']) / a 
+        
+    # Get Cz_s for the stability condition
+    rho = get_density(feet_to_meters * adf_data['altitude'])
+    p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
+    adf_data['Cz_s'] = -(adf_data['m'] * g) / (p_d * adf_data['S'])
+        
     
     return adf_data
+
+def get_temperature (altitude):
+    """
+    This function calculates the temperature for a given altitude
+    
+    Inputs:
+        altitude: Flight altitude (m)
+        
+    Outputs:
+        T: Temperature (K)
+    
+    """
+    alpha_T  = 6.5e-3
+    T_0     = 288.15
+
+    if altitude <= 11000.0:    
+        T = T_0 - alpha_T * altitude
+    else:
+        T = T_0 - alpha_T * 11000.0
+    
+    return T
 
 def get_density (altitude):
     """
@@ -76,150 +116,290 @@ def get_density (altitude):
     alpha_T  = 6.5e-3
     T_0     = 288.15
     Ra      = 287.05
-        
-    rho = rho_0 * ((1 - (alpha_T * altitude)/T_0) ** ((g/(Ra * alpha_T)) - 1))
-
+    
+    if altitude <= 11000.0:    
+        rho = rho_0 * ((1 - (alpha_T * altitude)/T_0) ** ((g/(Ra * alpha_T)) - 1))
+    else:
+        rho_11 = rho_0 * ((1 - (alpha_T * 11000.0)/T_0) ** ((g/(Ra * alpha_T)) - 1))
+        T_11   = 216.65
+        rho    = rho_11 * math.e ** (-g * (altitude - 11000.0) / (Ra * T_11))
+    
     return rho
 
-def get_dynamic_pressure(rho,V):
+def get_speed_of_sound (altitude):
+    """
+    This function calculates the speed of sound for a given altitude
+    
+    Inputs:
+        altitude: Flight altitude (m)
+        
+    Outputs:
+        a: speed of sound (m/s)
+    
+    """
+    gamma = 1.4
+    R     = 286.0
+    
+    T = get_temperature(altitude)
+    
+    a = (gamma * R * T) ** 0.5
+    
+    return a
+
+def get_dynamic_pressure(rho,speed):
     """
     This function calculates the dynamic pressure for a given density and speed
     
     Inputs:
         rho: Air density (kg/m3)
-        V : Speed (m/s)
+        speed : Speed (m/s)
         
     Outputs:
         p_d: Dynamic pressure (N/m2)
     
     """
     
-    p_d = 0.5 * rho * V ** 2
+    p_d = 0.5 * rho * speed ** 2
     
     return p_d
 
-def calculate_static_long(S, c, Ix, Iy, Iz, Jxz, p, q, r, pp, qq, rr,
-                          T, epsilon, ni, d_CG_x, d_CG_y, d_CG_z,
-                          altitude, V, cm_0, cm_alpha, cm_delta_e, alpha):
+def calculate_static_long(adf_data, input_data):
     """
     This function calculates the static longitudinal stability and control
     
     Inputs:
-        S : Wing surface (m2)
-        c : Mean aerodynamic chord (m)
-        Ix, Iy, Iz, Jxz : Tensor of inertia (kg*m2)
-        p, q, r : Angular velocity (rad/s)
-        pp, qq, rr : Angular acceleration (rad/s2)
-        T : Engine thrust (N)
-        epsilon : Engine angle of atack (deg)
-        ni : Engine sideslip angle (deg)
-        d_CG_x : X distance from the engine to the CG (m)
-        d_CG_y : Y distance from the engine to the CG (m)
-        d_CG_z : Z distance from the engine to the CG (m)
-        altitude : Flight altitude (ft)
-        V : Speed (kt)
-        cm_0, cm_alpha, cm_delta_e : longitudinal derivatives (-)
-        alpha: Angle of atack (deg)
+        adf_data: dictionary with the aircraft data
+        input_data: dictionary with the input data
         
-    Output:
-        delta_e : Elevator deflection (deg)
-    
+    Outputs:
+        alpha_trim, delta_e_trim : Trim values (deg)
+        alpha, delta_e : Elevator deflection vs. alpha (deg)   
+        
     """  
+
+    # Intermediate calculations   
+    rho = get_density(feet_to_meters * adf_data['altitude'])
+    p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
     
+    """
+    # Propulsion
+    
+    n_engines = len(adf_data['T'])
+    
+    Ft_z = sum(-adf_data['T'][i] * math.sin(np.radians(adf_data['epsilon'][i]))  for i in range(n_engines))
+
+    
+    Mt_y = sum(adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['d_CG_z'][i] +
+               math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['d_CG_x'][i]) for i in range(n_engines))
+    """
+    
+    # TRIM
+    CL_alpha   = - adf_data['Cz_alpha']
+    CL_delta_e = - adf_data['Cz_delta_e']
+    CL_0       = - adf_data['Cz_0']
+    
+    A = np.array([[            CL_alpha,             CL_delta_e],
+                  [adf_data['Cm_alpha'], adf_data['Cm_delta_e']]])
+    
+    """
+    B = np.array([[(adf_data['m'] * g + Ft_z) / (p_d * adf_data['S']) - adf_data['Cz_0']],
+                  [-Mt_y / (p_d * adf_data['S'] * adf_data['c']) -adf_data['Cm_0']]])
+    """
+    B = np.array([[(adf_data['m'] * g) / (p_d * adf_data['S']) - CL_0],
+                  [-adf_data['Cm_0']]])
+
+    X = np.linalg.solve(A,B)
+    
+    alpha_trim   = np.degrees(X[0])[0]
+    delta_e_trim = np.degrees(X[1])[0]
+    
+    # CONTROL
     # Cinematic momentum in Y axis
-    M = Iy * qq - (Iz - Ix) * p * r + Jxz * (p ** 2 - r ** 2)
-    
-    # Thrust momentum
-    n_engines = len(T)
-    Mt = 0
-    for i in range(n_engines):
-        Mt = Mt + T[i] * (math.cos(deg_to_rad * epsilon[i]) * math.cos(deg_to_rad * ni[i]) * d_CG_z[i] +
-                          math.sin(deg_to_rad * epsilon[i]) * d_CG_x[i])
-    
+    #M_y = 0.0
+
     # Calculate elevator deflection for balance
-    altitude_m = feet_to_meters * altitude
-    V_ms = kt_to_ms * V 
+    if 'alpha' in input_data:
+        delta_e = np.array([])
+        for alpha in input_data['alpha']:
+            #d_e = ((M_y - Mt_y) / (p_d * adf_data['S'] * adf_data['c']) - adf_data['Cm_0'] - adf_data['Cm_alpha'] * (np.radians(alpha))) / adf_data['Cm_delta_e']
+            d_e = (- adf_data['Cm_0'] - adf_data['Cm_alpha'] * (np.radians(alpha))) / adf_data['Cm_delta_e']
     
-    rho = get_density(altitude_m)
-    p_d = get_dynamic_pressure(rho, V_ms)
-    
-    delta_e = ((M - Mt) / (p_d * S * c) - cm_0 - cm_alpha * (alpha * deg_to_rad)) / cm_delta_e
-    
-    delta_e = delta_e / deg_to_rad
+            delta_e = np.append(delta_e, np.degrees(d_e))
+    else:
+        delta_e = np.nan
+        
+    return alpha_trim, delta_e_trim, delta_e
 
-    return delta_e
-
-def calculate_static_latdir(S, b, Ix, Iy, Iz, Jxz, p, q, r, pp, qq, rr,
-                            T, epsilon, ni, d_CG_x, d_CG_y, d_CG_z, altitude, V,
-                            cl_0, cl_beta, cl_delta_a, cl_delta_r,
-                            cn_0, cn_beta, cn_delta_a, cn_delta_r,
-                            beta):
+def calculate_static_latdir(adf_data, input_data):
     """
     This function calculates the static lateral-directionsl stability 
     and control
     
     Inputs:
-        S : Wing surface (m2)
-        b : Wingspan (m)
-        Ix, Iy, Iz, Jxz : Tensor of inertia (kg*m2)
-        p, q, r : Angular velocity (rad/s)
-        pp, qq, rr : Angular acceleration (rad/s2)
-        T : Engine thrust (N)
-        epsilon : Engine angle of atack (deg)
-        ni : Engine sideslip angle (deg)
-        d_CG_x : X distance from the engine to the CG (m)
-        d_CG_y : Y distance from the engine to the CG (m)
-        d_CG_z : Z distance from the engine to the CG (m)
-        altitude : Flight altitude (ft)
-        V : Speed (kt)
-        cl_0, cl_beta, cl_delta_a, cl_delta_re : lateral derivatives (-)
-        cn_0, cn_beta, cn_delta_a, cn_delta_r : Direcional derivatives (-)
-        beta: Sideslip angle (deg)
+        adf_data: dictionary with the aircraft data
+        input_data: dictionary with the input data
         
-    Output:
-        delta_a : Aileron deflection (deg)
-        delta_r : Rudder deflection (deg)
+    Outputs:
+        phi_b, delta_a_b, delta_r_b: Trim values for a given beta
+        beta_p, delta_a_p, delta_r_p, n_p: Trim values for a stationary turn (fixed phi)
     
     """  
     
-    altitude_m = feet_to_meters * altitude
-    V_ms = kt_to_ms * V 
+    # Intermediate calculations   
+    rho = get_density(feet_to_meters * adf_data['altitude'])
+    p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
     
-    rho = get_density(altitude_m)
-    p_d = get_dynamic_pressure(rho, V_ms)
+    # Propulsion
+    n_engines = len(adf_data['T'])
     
-    # Cinematic momentum in X axis
-    L = Ix * pp - Jxz * rr + (Iz - Iy) * q * r - Jxz * p * q
+    Ft_y = sum(input_data['T_rate'][i] * adf_data['T'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in range(n_engines))
     
-    # Thrust momentum in X asis
-    n_engines = len(T)
-    Lt = 0
-    for i in range(n_engines):
-        Lt = Lt + T[i] * (- math.cos(deg_to_rad * epsilon[i]) * math.sin(deg_to_rad * ni[i]) * d_CG_z[i]
-                          - math.sin(deg_to_rad * epsilon[i]) * d_CG_y[i])
+    Lt   = sum(-input_data['T_rate'][i] * adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['d_CG_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['d_CG_y'][i]) for i in range(n_engines))
     
-    # Cinematic momentum in Z axis
-    N = Iz * rr - Jxz * pp - (Ix - Iy) * p * q + Jxz * q * r
+    Nt   = sum(input_data['T_rate'][i] * adf_data['T'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['d_CG_y'][i] +
+             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['d_CG_x'][i]) for i in range(n_engines))
     
-    # Thrust momentum in Z asis
-    n_engines = len(T)
-    Nt = 0
-    for i in range(n_engines):
-        Nt = Nt + T[i] * (- math.cos(deg_to_rad * epsilon[i]) * math.cos(deg_to_rad * ni[i]) * d_CG_y[i]
-                          + math.cos(deg_to_rad * epsilon[i]) * math.sin(deg_to_rad * ni[i]) * d_CG_x[i])
+    # TRIM 
+    phi_b     = np.array([])
+    delta_a_b = np.array([])
+    delta_r_b = np.array([])
     
-    # Calculate ailerond and rudder deflection for balance (Eq. system: A*X=B)
-    A = np.array([[cl_delta_a, cl_delta_r], [cn_delta_a, cn_delta_r]])
-    B = np.array([[(L - Lt) / (p_d * S * b) - cl_0 - cl_beta * (deg_to_rad * beta)],
-                  [(N - Nt) / (p_d * S * b) - cn_0 - cn_beta * (deg_to_rad * beta)]])
+    beta_p    = np.array([])
+    delta_a_p = np.array([])
+    delta_r_p = np.array([])
+    n_p       = np.array([])  # Load factor
     
-    X = np.linalg.solve(A[:,:,0],B[:,:,0])
-    
-    delta_a = X[0] / deg_to_rad
-    delta_r = X[1] / deg_to_rad
+    if 'beta' in input_data: # Fixed beta 
+        A = np.array([[adf_data['m'] * g / (p_d * adf_data['S']), adf_data['Cy_delta_a'], adf_data['Cy_delta_r']],
+                      [                                      0.0, adf_data['Cl_delta_a'], adf_data['Cl_delta_r']],
+                      [                                      0.0, adf_data['Cn_delta_a'], adf_data['Cn_delta_r']]])
 
-    return delta_a, delta_r
+        for beta_ in input_data['beta']:          
+            B = np.array([[-adf_data['Cy_beta'] * np.radians(beta_) - Ft_y / (p_d * adf_data['S'])],
+                          [-adf_data['Cl_beta'] * np.radians(beta_) - Lt / (p_d * adf_data['S'] * adf_data['b'])],
+                          [-adf_data['Cn_beta'] * np.radians(beta_) - Nt / (p_d * adf_data['S'] * adf_data['b'])]])
+            
+            X = np.linalg.solve(A,B)
+        
+            phi_b     = np.append(phi_b, np.degrees(X[0]))
+            delta_a_b = np.append(delta_a_b, np.degrees(X[1]))
+            delta_r_b = np.append(delta_r_b, np.degrees(X[2]))
+        
+    if 'phi' in input_data: # Stationary turn
+        
+        A = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_a'], adf_data['Cy_delta_r']],
+                      [adf_data['Cl_beta'], adf_data['Cl_delta_a'], adf_data['Cl_delta_r']],
+                      [adf_data['Cn_beta'], adf_data['Cn_delta_a'], adf_data['Cn_delta_r']]])
+        
+        u  = kt_to_ms * adf_data['KTAS']
+        
+        for phi_ in input_data['phi']:
+            k1 = (adf_data['b'] * g * math.sin(np.radians(phi_))) / (2.0 * u ** 2)
+            k2 = (g ** 2 * math.sin(np.radians(phi_)) ** 3) / (p_d * adf_data['S'] * adf_data['b'] * u ** 2 * math.cos(np.radians(phi_)))
+            
+            B = np.array([[-adf_data['Cy_r'] * k1 - Ft_y / (p_d * adf_data['S'])],
+                          [(adf_data['Iz'] - adf_data['Iy']) * k2 - adf_data['Cl_r'] * k1 - Lt / (p_d * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Jxz'] * k2 - adf_data['Cn_r'] * k1 - Nt / (p_d * adf_data['S'] * adf_data['b'])]])
+            
+            X = np.linalg.solve(A,B)
+            
+            beta_p    = np.append(beta_p, np.degrees(X[0]))
+            delta_a_p = np.append(delta_a_p, np.degrees(X[1]))
+            delta_r_p = np.append(delta_r_p, np.degrees(X[2]))
+            n_p       = np.append(n_p, 1.0 / math.cos(np.radians(phi_)))
+        
+    return phi_b, delta_a_b, delta_r_b, beta_p, delta_a_p, delta_r_p, n_p
 
+def calculate_dynamic_long(adf_data):
+    """
+    This function calculates the dynamic longitudinal stability
+    
+    Inputs:
+        adf_data: dictionary with the aircraft data
+
+    Outputs:
+        wn_ph, zeta_ph, lambda_ph: results for phugoide mode
+        wn_sp, zeta_sp, lambda_sp: results for short period mode
+    
+    """  
+    
+    rho = get_density(feet_to_meters * adf_data['altitude'])
+    
+    mu = adf_data['m'] / (0.5 * rho * adf_data['S'] *  adf_data['c'])
+    
+    Iy_ad = adf_data['Iy'] / (rho * adf_data['S'] * (adf_data['c'] / 2) ** 3)
+    
+    # PHUGOID
+    wn_ph_ad = ((adf_data['Cz_s'] * (2 * adf_data['Cz_s'] + adf_data['Cz_u'])) / (2 * mu * (2 * mu + adf_data['Cz_q']))) ** 0.5
+    wn_ph    = wn_ph_ad / (adf_data['c'] / (2 * kt_to_ms * adf_data['KTAS']))
+    
+    zeta_ph  = -(adf_data['Cx_u'] * (2 * mu + adf_data['Cz_q'])) / (2 * (adf_data['Cz_s'] * (2 * adf_data['Cz_s'] + adf_data['Cz_u']) * 2 * mu * (2 * mu + adf_data['Cz_q'])) ** 0.5)
+    
+    lambda_r  = -zeta_ph * wn_ph
+    lambda_i  = wn_ph * (1 - zeta_ph ** 2) ** 0.5
+    lambda_ph = np.array([[lambda_r, lambda_i], [lambda_r, -lambda_i]])
+    
+    #wn2 = 2 ** 0.5 * g / ( kt_to_ms * adf_data['KTAS']) 
+    #zeta2 = adf_data['Cx_u']/(2 * 2 ** 0.5 * adf_data['Cz_s'])
+    
+    # SHORT PERIOD
+    wn_sp_ad = ((adf_data['Cz_alpha'] * adf_data['Cm_q'] - (2 * mu + adf_data['Cz_q']) * adf_data['Cm_alpha']) / ((2 * mu - adf_data['Cz_alpha_dot']) * Iy_ad)) ** 0.5
+    wn_sp    = wn_sp_ad / (adf_data['c'] / (2 * kt_to_ms * adf_data['KTAS']))
+    
+    zeta_sp = -((2 * mu - adf_data['Cz_alpha_dot']) * adf_data['Cm_q'] + adf_data['Cz_alpha'] * Iy_ad + (2 * mu + adf_data['Cz_q']) * adf_data['Cm_alpha_dot']) / (2 * ((2 * mu - adf_data['Cz_alpha_dot']) * Iy_ad * (adf_data['Cz_alpha'] * adf_data['Cm_q'] - (2 * mu + adf_data['Cz_q']) * adf_data['Cm_alpha'])) ** 0.5)
+    
+    lambda_r  = -zeta_sp * wn_sp
+    lambda_i  = wn_sp * (1 - zeta_sp ** 2) ** 0.5
+    lambda_sp = np.array([[lambda_r, lambda_i], [lambda_r, -lambda_i]])
+
+    return wn_ph, zeta_ph, lambda_ph, wn_sp, zeta_sp, lambda_sp 
+
+def calculate_dynamic_latdir(adf_data):
+    """
+    This function calculates the dynamic lateral-directional stability
+    
+    Inputs:
+        adf_data: dictionary with the aircraft data
+
+    Outputs:
+        wn_rs, lambda_rs: results for roll subsidence mode
+        wn_spi, lambda_spi: results for spiral mode
+        wn_dr, zeta_dr, lambda_dr: results for dutch roll mode
+    
+    """
+    
+    rho = get_density(feet_to_meters * adf_data['altitude'])
+    
+    mu = adf_data['m'] / (0.5 * rho * adf_data['S'] *  adf_data['b'])
+    
+    Ix_ad = adf_data['Ix'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
+    Iz_ad = adf_data['Iz'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
+    
+    # ROLL SUBSIDENCE
+    lambda_rs_ad = adf_data['Cl_p'] / Ix_ad 
+    lambda_rs    = lambda_rs_ad/ (adf_data['b'] / (2 * kt_to_ms * adf_data['KTAS']))
+    
+    wn_rs = lambda_rs
+    
+    # SPIRAL
+    lambda_spi_ad = -(adf_data['Cz_s'] * (adf_data['Cl_beta'] * adf_data['Cn_r'] - adf_data['Cn_beta'] * adf_data['Cl_r'])) / ((2 * mu) * (adf_data['Cn_beta'] * adf_data['Cl_p'] - adf_data['Cl_beta'] * adf_data['Cn_p']) + adf_data['Cy_beta'] * (adf_data['Cl_p'] * adf_data['Cn_r'] - adf_data['Cn_p'] * adf_data['Cl_r']))
+    lambda_spi    = lambda_spi_ad/ (adf_data['b'] / (2 * kt_to_ms * adf_data['KTAS']))
+    
+    wn_spi = lambda_spi
+    
+    # DUTCH ROLL
+    wn_dr_ad = (adf_data['Cn_beta'] / Iz_ad) ** 0.5
+    wn_dr    = wn_dr_ad / (adf_data['b'] / (2 * kt_to_ms * adf_data['KTAS']))
+    
+    zeta_dr = -adf_data['Cn_r'] / (2 * (Iz_ad * adf_data['Cn_beta']) ** 0.5)
+    
+    lambda_r  = -zeta_dr * wn_dr
+    lambda_i  = wn_dr * (1 - zeta_dr ** 2) ** 0.5
+    lambda_dr = np.array([[lambda_r, lambda_i], [lambda_r, -lambda_i]])
+
+    return wn_rs, lambda_rs, wn_spi, lambda_spi, wn_dr, zeta_dr, lambda_dr
+    
 def plot_out_static(out_data):
     """ 
     This function plot the calculated outputs
@@ -232,6 +412,10 @@ def plot_out_static(out_data):
     
     """  
 
+    """
+    TO BE UPDATED
+    """
+    
     for alt in np.unique(out_data['altitude']): # Plot for each altitude
         condition_alt = out_data['altitude'] == alt
         for spd in np.unique(out_data['V']):    # Plot for each speed
@@ -282,56 +466,203 @@ def plot_out_static(out_data):
                 fig.savefig(fig_name)
                 plt.show()
 
-def output_file(out_data):
+def write_output_file(out_data, input_data):
     """ 
-    this function writes an output file
+    This function writes an output file
     ​
     Inputs: 
     out_data: dictionary with the variables already calculated
     ​
     Outputs:
-    output_file: file.txt  with the study results
+    output_file: file with the calculated values
     ​
     """
-    variables = ['altitude',     'V',     'p',     'q',     'r',     'pp',     'qq',     'rr', 'alpha', 'beta', 'delta_e', 'delta_a', 'delta_r']
-    header    = ['Altitude', 'Speed',     'p',     'q',     'r',     'pp',     'qq',     'rr', 'Alpha', 'Beta', 'Delta_e', 'Delta_a', 'Delta_r']
-    units     = [      'ft',    'kt', 'rad/s', 'rad/s', 'rad/s', 'rad/s2', 'rad/s2', 'rad/s2',   'deg',  'deg',     'deg',     'deg',     'deg']
-    separation= ['--------', '-----', '-----', '-----', '-----', '------', '------', '------', '-----', '----', '-------', '-------', '-------']
+    
+    lines = '*' * 80 + '\n'
+    
+    with open(out_data['file'], 'w') as f:
 
-    n_var = len(variables)
-    n_row = len(out_data['altitude'])
+        f.write('\n')
+        
+        # AIRCRAFT AND CONDITIONS
+        f.write(' Aircraft : ' + input_data['aircraft'] + '\n')
+        f.write(' Altitude : ' + '{:.1f}'.format(out_data['altitude']) + ' ft\n')
+        if out_data['speed'] < 5.0:
+            f.write('    Speed : M' + '{:.2f}'.format(out_data['speed']) + '\n')
+        else:
+            f.write('    Speed : ' + '{:.1f}'.format(out_data['speed']) + ' kt\n')
+        
+        f.write('\n')
+        
+        # STATIC - LONGITUDINAL
+        if input_data['type'] == 1 or input_data['type'] == 0:
+            f.write(lines)
+            f.write('{:^80s}'.format('STATIC - LONGITUDINAL') + '\n')
+            f.write(lines)
+            
+            # Trim
+            f.write('Trim:\n')        
+            f.write('{:>11s}'.format('Alpha :') + '{:8.3f}'.format(out_data['alpha_trim']) + ' deg \n')
+            f.write('{:>11s}'.format('Delta_e :') + '{:8.3f}'.format(out_data['delta_e_trim']) + ' deg \n')
+            f.write('\n')
+            
+            # Control sensitivity
+            if 'alpha' in input_data:
+                variable = ['alpha', 'delta_e']
+                header   = ['Alpha', 'Delta_e']
+                units    = [  'deg',     'deg']
+                
+                f.write('Control sensitivity:\n') 
+                
+                # Header
+                string = ['{:>11s}'.format(s) for s in header]
+                string = ''.join(string) + '\n'
+                f.write(string)
+                
+                # Units
+                string = ['{:>11s}'.format(s) for s in units]
+                string = ''.join(string) + '\n'
+                f.write(string)
+                
+                # Line
+                string = '    ' + '-' * (11 * len(header) - 4) + '\n'
+                f.write(string)
+        
+                # Variables
+                for i in range(len(input_data['alpha'])):
+                    string = input_data[variable[0]][i]
+                    string = np.append(string, [out_data[var][i] for var in variable[1:]])
+                    string = ['{:>11.3f}'.format(s) for s in string]
+                    string = ''.join(string) + '\n'
+                    f.write(string) 
+                f.write('\n')
+                
+            f.write('\n')
 
-    with open(out_data['file'], "w") as f:
-
-        f.write("\n")
-
-        f.write("Aircraft: " + out_data["aircraft"]) #escribir 'titulo' indicando el avion que es
-        f.write("\n"*3)
-
-        # Headers
-        string = ['{:>11s}'.format(s) for s in header]
-        string = ''.join(string) + '\n'
-        f.write(string) 
-
-        #Units  
-        string = ['{:>11s}'.format(s) for s in units]
-        string = ''.join(string) + '\n'
-        f.write(string)
-
-        #separation
-        string = ['{:>11s}'.format(s) for s in separation]
-        string = ''.join(string) + '\n'
-        #string = '-' * 11 * n_var + '\n'
-        f.write(string)
-
-        #variables
-        for i in range(n_row):
-            string = [out_data[var][i] for var in variables]
-            string = ['{:>11.3f}'.format(s) for s in string]
-            string = ''.join(string) + '\n'
-            f.write(string)
-
-
+        # STATIC - LATERAL/DIRECTIONAL     
+        if input_data['type'] == 2 or input_data['type'] == 0:
+            f.write(lines)
+            f.write('{:^80s}'.format('STATIC - LATERAL/DIRECTIONAL') + '\n')
+            f.write(lines)
+            if 'beta' in input_data:
+                variable = ['beta', 'phi_b', 'delta_a_b', 'delta_r_b']
+                header   = ['Beta',   'Phi',   'Delta_a',   'Delta_r']
+                units    = [ 'deg',   'deg',       'deg',       'deg']
+                
+                f.write('Trim - sideslip angle:\n') 
+                
+                # Header
+                string = ['{:>11s}'.format(s) for s in header]
+                string = ''.join(string) + '\n'
+                f.write(string)
+                
+                # Units
+                string = ['{:>11s}'.format(s) for s in units]
+                string = ''.join(string) + '\n'
+                f.write(string)
+                
+                # Line
+                string = '    ' + '-' * (11 * len(header) - 4) + '\n'
+                f.write(string)
+        
+                # Variables
+                for i in range(len(input_data['beta'])):
+                    string = input_data[variable[0]][i]
+                    string = np.append(string, [out_data[var][i] for var in variable[1:]])
+                    string = ['{:>11.3f}'.format(s) for s in string]
+                    string = ''.join(string) + '\n'
+                    f.write(string) 
+                
+                f.write('\n')                
+                
+            if 'phi' in input_data:
+                variable = [ 'phi', 'n_p', 'beta_p', 'delta_a_p', 'delta_r_p']
+                header   = [ 'Phi',   'n',   'Beta',   'Delta_a',   'Delta_r']
+                units    = [ 'deg',   '-',    'deg',       'deg',       'deg']
+                
+                f.write('Trim - stationary turn:\n') 
+                
+                # Header
+                string = ['{:>11s}'.format(s) for s in header]
+                string = ''.join(string) + '\n'
+                f.write(string)
+                
+                # Units
+                string = ['{:>11s}'.format(s) for s in units]
+                string = ''.join(string) + '\n'
+                f.write(string)
+                
+                # Line
+                string = '    ' + '-' * (11 * len(header) - 4) + '\n'
+                f.write(string)
+        
+                # Variables
+                for i in range(len(input_data['phi'])):
+                    string = input_data[variable[0]][i]
+                    string = np.append(string, [out_data[var][i] for var in variable[1:]])
+                    string = ['{:>11.3f}'.format(s) for s in string]
+                    string = ''.join(string) + '\n'
+                    f.write(string) 
+                
+                f.write('\n')
+                
+            f.write('\n')
+            
+        # DYNAMIC - LONGITUDINAL 
+        if input_data['type'] == 3 or input_data['type'] == 0:
+            f.write(lines)
+            f.write('{:^80s}'.format('DYNAMIC - LONGITUDINAL') + '\n')
+            f.write(lines)
+            
+            # Phugoid
+            f.write('Modes:\n')  
+            f.write('{:10.4f}'.format(out_data['lambda_ph'][0,0]) + '{:+8.4f}'.format(out_data['lambda_ph'][0,1]) + 'j\n')
+            f.write('{:10.4f}'.format(out_data['lambda_ph'][1,0]) + '{:+8.4f}'.format(out_data['lambda_ph'][1,1]) + 'j\n')
+            f.write('{:10.4f}'.format(out_data['lambda_sp'][0,0]) + '{:+8.4f}'.format(out_data['lambda_sp'][0,1]) + 'j\n')
+            f.write('{:10.4f}'.format(out_data['lambda_sp'][1,0]) + '{:+8.4f}'.format(out_data['lambda_sp'][1,1]) + 'j\n')
+            f.write('\n')
+            
+            f.write('Phugoid:\n')
+            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_ph']) + '\n')
+            f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_ph']) + '\n')
+            f.write('\n')
+            
+            f.write('Short period:\n')
+            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_sp']) + '\n')
+            f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_sp']) + '\n')
+            f.write('\n')
+            
+            f.write('\n')
+            
+        # DYNAMIC - LONGITUDINAL 
+        if input_data['type'] == 4 or input_data['type'] == 0:
+            f.write(lines)
+            f.write('{:^80s}'.format('DYNAMIC - LATERAL/DIRECTIONAL') + '\n')
+            f.write(lines)
+            
+            # Phugoid
+            f.write('Modes:\n')  
+            f.write('{:10.4f}'.format(out_data['lambda_rs']) + '{:+8.4f}'.format(0.0) + 'j\n')
+            f.write('{:10.4f}'.format(out_data['lambda_spi']) + '{:+8.4f}'.format(0.0) + 'j\n')
+            f.write('{:10.4f}'.format(out_data['lambda_dr'][0,0]) + '{:+8.4f}'.format(out_data['lambda_dr'][0,1]) + 'j\n')
+            f.write('{:10.4f}'.format(out_data['lambda_dr'][1,0]) + '{:+8.4f}'.format(out_data['lambda_dr'][1,1]) + 'j\n')
+            f.write('\n')
+            
+            f.write('Roll subsidence:\n')
+            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_rs']) + '\n')
+            f.write('\n')
+            
+            f.write('Spiral:\n')
+            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_spi']) + '\n')
+            f.write('\n')
+            
+            f.write('Dutch roll:\n')
+            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_dr']) + '\n')
+            f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_dr']) + '\n')
+            f.write('\n')
+            
+            f.write('\n')
+                                  
 """
 MAIN PROGRAM
 
@@ -341,112 +672,51 @@ MAIN PROGRAM
  Global variables:
      feet_to_meters: Feet to meters conversion factor
      kt_to_ms: Knots to meters per second conversion factor
-     deg_to_rad: Degrees to radians conversion factor
      g: Acceleration of gravity
 
 """
+
 feet_to_meters = 0.3048
-kt_to_ms = 0.514444
-deg_to_rad = math.pi / 180.0
-g = 9.80665
+kt_to_ms       = 0.514444
+g              = 9.80665
 
 # Define input file path
-#file = './longitudinal/static_long.dat'
-file = 'input_file_template.dat'
+file = './study/HS.dat'
 
 # Read input and aircraft data
 input_data, adf_data = read_input_file(file)
 
-# Check alpha and beta input values
-if input_data['type'] == 1 and (len(input_data['beta']) > 1 or input_data['beta'][0] != 0):
-    print('Longitudinal study: beta should be zero')
-    print('Setting beta as 0 deg')
-    input_data['beta'] = np.array([0.0])
-if input_data['type'] == 2 and len(input_data['alpha']) > 1:
-    print('Lateral dirctional study: alpha should be constant, an array is not allowed')
-    print('Setting alpha as alpha[0]')
-    input_data['alpha'] = np.array([input_data['alpha'][0]])
+# Initialize output dictionary
+out_data = {}
+out_data['file']     = file[:-4] + '.out'
+out_data['altitude'] = adf_data['altitude']
+out_data['speed']    = adf_data['speed']
 
-for key,val in input_data.items():
-        exec(key + '=val')
-for key,val in adf_data.items():
-        exec(key + '=val')
-
-# Calculate stability and control
-
-# Static
-if input_data['type'] == 1 or input_data['type'] == 2:
-    
-    # Initialize output dictionary
-    variable_name = ['file']
-    for key, val in input_data.items():
-        variable_name.append(key)
-    variable_name = variable_name + ['delta_e', 'delta_a', 'delta_r']
-    out_data = dict([(key, []) for key in variable_name])
-    
-    out_data['file']     = file[:-4] + '.out'
-    out_data['aircraft'] = input_data['aircraft']
-    out_data['type']     = input_data['type']
-    
-    # Calculate    
-    for alt in altitude:    # Scan altitude array
-        for spd in V:       # Scan speed array
+# CALCULATE
+# Static - longitudinal
+if input_data['type'] == 1 or input_data['type'] == 0:
+    out_data['alpha_trim'], out_data['delta_e_trim'], out_data['delta_e'] = calculate_static_long(adf_data, input_data)
             
-            # Static - longitudinal
-            if input_data['type'] == 1:
-                for alpha_ in alpha: # Scan alpha array
-                    delta_e = calculate_static_long(S, c, Ix, Iy, Iz, Jxz, p, q, r, pp, qq, rr,
-                                                    T, epsilon, ni, d_CG_x, d_CG_y, d_CG_z,
-                                                    alt, spd, cm_0, cm_alpha, cm_delta_e, alpha_)
-                    
-                    out_data['altitude'] = np.append(out_data['altitude'], alt)
-                    out_data['V']        = np.append(out_data['V'], spd)
-                    out_data['alpha']    = np.append(out_data['alpha'], alpha_)
-                    out_data['beta']     = np.append(out_data['beta'], input_data['beta'][0])
-                    out_data['delta_e']  = np.append(out_data['delta_e'], delta_e[0])
-                    out_data['delta_a']  = np.append(out_data['delta_a'], 0.0)
-                    out_data['delta_r']  = np.append(out_data['delta_r'], 0.0)
-                    
-            # Static - lateral-directional   
-            elif input_data['type'] == 2:
-                for beta_ in beta:  # Scan beta array
-                    delta_a, delta_r = calculate_static_latdir(S, b, Ix, Iy, Iz, Jxz, p, q, r, pp, qq, rr,
-                                                               T, epsilon, ni, d_CG_x, d_CG_y, d_CG_z, alt, spd,
-                                                               cl_0, cl_beta, cl_delta_a, cl_delta_r,
-                                                               cn_0, cn_beta, cn_delta_a, cn_delta_r,
-                                                               beta_)
-                    
-                    out_data['altitude'] = np.append(out_data['altitude'], alt)
-                    out_data['V']        = np.append(out_data['V'], spd)
-                    out_data['alpha']    = np.append(out_data['alpha'], input_data['alpha'][0])
-                    out_data['beta']     = np.append(out_data['beta'], beta_)
-                    out_data['delta_e']  = np.append(out_data['delta_e'], 0.0)
-                    out_data['delta_a']  = np.append(out_data['delta_a'], delta_a[0])
-                    out_data['delta_r']  = np.append(out_data['delta_r'], delta_r[0])
-            
-    # Compete dictionary with constant variables            
-    n_cases = len(out_data['altitude'])
-    out_data['p']  = np.ones(n_cases) * input_data['p']
-    out_data['q']  = np.ones(n_cases) * input_data['q']
-    out_data['r']  = np.ones(n_cases) * input_data['r']
-    out_data['pp'] = np.ones(n_cases) * input_data['pp']
-    out_data['qq'] = np.ones(n_cases) * input_data['qq']
-    out_data['rr'] = np.ones(n_cases) * input_data['rr']
+# Static - lateral-directional   
+if input_data['type'] == 2 or input_data['type'] == 0:
+    out_data['phi_b'], out_data['delta_a_b'], out_data['delta_r_b'], out_data['beta_p'], out_data['delta_a_p'], out_data['delta_r_p'], out_data['n_p'] = calculate_static_latdir(adf_data, input_data)
 
-# Dynamic - TO DO   
-else:
-    print('Dynamic stability and control not available for calculation')
+# Dynamic - longitudinal 
+if input_data['type'] == 3 or input_data['type'] == 0:
+    out_data['wn_ph'], out_data['zeta_ph'], out_data['lambda_ph'], out_data['wn_sp'], out_data['zeta_sp'], out_data['lambda_sp'] = calculate_dynamic_long(adf_data)    
+
+# Dynamic - longitudinal 
+if input_data['type'] == 4 or input_data['type'] == 0:
+    out_data['wn_rs'], out_data['lambda_rs'], out_data['wn_spi'], out_data['lambda_spi'], out_data['wn_dr'], out_data['zeta_dr'], out_data['lambda_dr'] = calculate_dynamic_latdir(adf_data)    
     
-    
+      
+# Print results   
+write_output_file(out_data, input_data)
+
+"""
 # Plot results
 if input_data['type'] == 1 or input_data['type'] == 2: # Static    
     plot_out_static(out_data)
 else: # Dynamic
     print('Dynamic stability and control not available for plotting')
-
-
-# Print results (output_file)
-if input_data['type'] == 1 or input_data['type'] == 2: # Static    
-    output_file(out_data)
-else: # Dynamic
-    print('Dynamic stability and control not available for printing')
+"""

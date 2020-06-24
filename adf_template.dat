@@ -1,13 +1,23 @@
 ######################################################################
 #                                                                    #
-#                            AIRCRAFT NAME                           #
-#                           CONFIGURATION X                          #
-#                              LOW SPEED                             #
+#                          Boeing 747                                #
+#                          High speed                                #
 #                                                                    #
 ######################################################################
 
 ######################################################################
+#                        REFERENCE CONDITIONS                        #
+#                                                                    #
+#        altitude : Flight altitude (ft)                             #
+#           speed : Speed (Mach / KTAS)                              #
+
+         altitude : 40000.0
+            speed : 0.8  
+
+######################################################################
 #                              GEOMETRY                              #
+#                                                                    #
+#               m : Weight (kg)                                      #
 #                                                                    #
 #               S : Wing surface (m2)                                #
 #               c : Mean aerodynamic chord (m)                       #
@@ -18,15 +28,17 @@
 #              Iz : Moment of inertia about Z axis (kg*m2)           #
 #             Jxz : Product of inertia about XZ axes (kg*m2)         #
 
-                S : 153.0
-                c : 4.64
-                b : 33.0
+                m : 288773.0
 
-               Ix : 0.0
-               Iy : 0.0
-               Iz : 0.0
-              Jxz : 0.0
+                S : 511.0
+                c : 8.324
+                b : 59.64
 
+               Ix : 24700000.0
+               Iy : 44900000.0
+               Iz : 67300000.0
+              Jxz : -2120000.0
+                                                                     
 ######################################################################
 #                             PROPULSION                             #
 #                                                                    #
@@ -36,41 +48,79 @@
 #          d_CG_x : X distance to the CG (m)                         #
 #          d_CG_y : Y distance to the CG (m)                         #
 #          d_CG_z : Z distance to the CG (m)                         #
-
-                T : 231000.0
-          epsilon : 0.0
-               ni : 0.0
-           d_CG_x : -20.0
-           d_CG_y : 0.0
-           d_CG_z :-3.0
-
+      
+                T :  44550.0,  44550.0,  44550.0,  44550.0
+          epsilon :      0.0,      0.0,      0.0,      0.0
+               ni :      0.0,      0.0,      0.0,      0.0
+           d_CG_x :    -13.2,     -4.8,     -4.8,    -13.2
+           d_CG_y :    -21.3,    -12.1,     12.1,     21.3
+           d_CG_z :    2.331,    2.941,    2.941,    2.331
+	   
 ######################################################################
 #                            AERODYNAMICS                            #
 #                                                                    #
-#            cl_0 : Initial rolling moment coefficient(-)            #
-#         cl_beta : Dihedral effect (-)                              #
-#      cl_delta_a : Lateral control power (-)                        #
-#      cl_delta_r : Rolling moment coefficient due to delta_r (-)    #
+#                      Longitudinal derivatives                      #
+#                  Cx             Cz             Cm                  #
+#            ----------------------------------------------          #
+#          0 |   -              Cz_0           Cm_0                  #
+#          u |   Cx_u           Cz_u           Cm_u                  #
+#      alpha |   Cx_alpha       Cz_alpha       Cm_alpha              #
+#          q |   Cx_q           Cz_q           Cm_q                  #
+#  alpha_dot |   Cx_alpha_dot   Cz_alpha_dot   Cm_alpha_dot          #
+#            |                                                       #
+#    delta_e |   Cx_delta_e     Cz_delta_e     Cm_delta_e            #
 #                                                                    #
-#            cm_0 : Initial pitching moment(-)                       #
-#        cm_alpha : Longitudinal stability coefficient (-)           #
-#      cm_delta_e : Longitudinal control power (-)                   #
+#                  Lateral-directional derivatives                   #
+#                  Cy             Cl             Cn                  #
+#            ----------------------------------------------          #
+#       beta |   Cy_beta        Cl_beta        Cn_beta               #
+#          p |   Cy_p           Cl_p           Cn_p                  #
+#          r |   Cy_r           Cl_r           Cn_r                  #
+#            |                                                       #
+#    delta_a |   Cy_delta_a     Cl_delta_a     Cn_delta_a            #
+#    delta_r |   Cy_delta_r     Cl_delta_r     Cn_delta_r            #
 #                                                                    #
-#            cn_0 : Initial yawing moment (-)                        #
-#         cn_beta : Directional stability coefficient (-)            #
-#      cn_delta_a : Adverse yaw coefficient (-)                      #
-#      cn_delta_r : Directional control power (-)                    #
 
-             cl_0 : 0.0
-          cl_beta : -0.221
-       cl_delta_a : 0.0461
-       cl_delta_r : 0.007
+             Cz_0 : -0.298
+             Cm_0 : -0.047
 
-             cm_0 : -0.042
-         cm_alpha : -1.5
-       cm_delta_e : -1.3
+             Cx_u : -0.1080
+             Cz_u : -0.1060
+             Cm_u : 0.1043
 
-             cn_0 : 0.0
-          cn_beta : 0.150
-       cn_delta_a : 0.0064
-       cn_delta_r : -0.109
+         Cx_alpha : 0.235
+         Cz_alpha : -4.962
+         Cm_alpha : -1.033
+
+     Cx_alpha_dot : 0.0
+     Cz_alpha_dot : -5.910
+     Cm_alpha_dot : -6.410
+
+             Cx_q : 0.0
+             Cz_q : -6.000
+             Cm_q : -24.00
+
+       Cx_delta_e : 0.0
+       Cz_delta_e : -0.367 
+       Cm_delta_e : -1.450
+
+
+          Cy_beta : -0.88
+          Cl_beta : -0.277
+          Cn_beta : 0.195
+
+             Cy_p : 0.0
+             Cl_p : -0.334
+             Cn_p : -0.0415
+
+             Cy_r : 0.0
+             Cl_r : 0.3
+             Cn_r : -0.327
+
+       Cy_delta_a : 0.0
+       Cl_delta_a : 0.0137
+       Cn_delta_a : 0.0002
+
+       Cy_delta_r : 0.11465
+       Cl_delta_r : 0.007
+       Cn_delta_r : -0.1256

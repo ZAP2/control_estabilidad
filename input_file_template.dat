@@ -3,40 +3,38 @@
 #                                                                    #
 #              aircraft : Path to the ADF                            #
 #                                                                    #
-#              altitude : Flight altitude (ft)                       #
-#                     V : Speed (kt)                                 #
-#                                                                    #
 #                  type : Type of analysis                           #
+#                         0 : Complete analysis                      #
 #                         1 : Static - Longitudinal                  #
 #                         2 : Static - Lateral-Directional           #
 #                         3 : Dynamic - Longitudinal                 #
 #                         4 : Dynamic - Lateral-Directional          #
 #                                                                    #
-#                 alpha : Angle of atack (deg)                       #
+#                T_rate : Thrust rate control for each engine.       #
+#                         When modifying the unitary engine thrusts  #
+#                         the total thrust shall be constant         #
+#                                                                    #
+#           Static - longitudinal                                    #
+#                 alpha : Angle of atack (deg).                      #
+#                         Define to get elevator sensitivity         #
+#                         (optional)                                 #
+#                                                                    #
+#           Static - lateral/directional                             #
 #                  beta : Sideslip angle (deg)                       #
+#                         Define to get trim at constant beta        #
+#                   phi : Roll angle (deg)                           #
+#                         Define to get trim in a stationary turn    #
 #                                                                    #
-#                     p : Angular velocity X (rad/s)                 #
-#                     q : Angular velocity Y (rad/s)                 #
-#                     r : Angular velocity Z (rad/s)                 #
-#                                                                    #
-#                    pp : Angular acceleration X (rad/s2)            #
-#                    qq : Angular acceleration Y (rad/s2)            #
-#                    rr : Angular acceleration Z (rad/s2)            #
 
-               aircraft : adf_template.dat
+               aircraft : B747_HS.dat
 
-                   type : 1
+                   type : 0
 
-               altitude : 20000.0
-                      V : 250.0
+                 T_rate : 1.0, 1.0, 1.0, 1.0
 
-                  alpha : -5.0, 0.0, 5.0, 10.0
-                   beta : 0.0
+#           Static - longitudinal
+                  alpha :  -5.0, 0.0, 5.0, 10.0, 15.0
 
-                      p : 0.0
-                      q : 0.0
-                      r : 0.0
-
-                     pp : 0.0
-                     qq : 0.0
-                     rr : 0.0
+#           Static - lateral/directional
+                    phi : 30.0, 60.0
+                   beta :  1.0,  3.0
