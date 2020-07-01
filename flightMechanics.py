@@ -5,6 +5,8 @@
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+from sympy import symbols, Poly
+from scipy import signal
 
 
 def read_input_file(file):
@@ -76,7 +78,11 @@ def read_adf_file(file):
     rho = get_density(feet_to_meters * adf_data['altitude'])
     p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
     adf_data['Cz_s'] = -(adf_data['m'] * g) / (p_d * adf_data['S'])
-        
+    
+    # Temporary 
+    adf_data['Cm_delta_e_dot'] = 0.0 
+    adf_data['Cl_delta_a_dot'] = 0.0 
+    adf_data['Cn_delta_r_dot'] = 0.0 
     
     return adf_data
 
@@ -321,6 +327,8 @@ def calculate_dynamic_long(adf_data):
     Outputs:
         wn_ph, zeta_ph, lambda_ph: results for phugoide mode
         wn_sp, zeta_sp, lambda_sp: results for short period mode
+        
+        control response charts
     
     """  
     
@@ -330,29 +338,138 @@ def calculate_dynamic_long(adf_data):
     
     Iy_ad = adf_data['Iy'] / (rho * adf_data['S'] * (adf_data['c'] / 2) ** 3)
     
+    # STABILITY QUARTIC
+    
+    A = 2 * mu * Iy_ad *(2 * mu - adf_data['Cz_alpha_dot'])
+    
+    B = (-2 * mu * Iy_ad * (adf_data['Cz_alpha'] + adf_data['Cx_u']) + Iy_ad * adf_data['Cx_u'] * adf_data['Cz_alpha_dot']
+         -2 * mu * (adf_data['Cz_q'] * adf_data['Cm_alpha_dot'] - adf_data['Cm_q'] * adf_data['Cz_alpha_dot']) 
+         -4 * mu ** 2 * (adf_data['Cm_alpha_dot'] + adf_data['Cm_q']))
+    
+    C = (Iy_ad * (adf_data['Cx_u'] * adf_data['Cz_alpha'] - adf_data['Cx_alpha'] * adf_data['Cz_u']) +
+         2 * mu * (adf_data['Cz_alpha'] * adf_data['Cm_q'] - adf_data['Cm_alpha'] * adf_data['Cz_q'] + adf_data['Cx_u'] * adf_data['Cm_q'] + adf_data['Cx_u'] * adf_data['Cm_alpha_dot'])
+         - 4 * mu ** 2 * adf_data['Cm_alpha'] - adf_data['Cx_u'] * (adf_data['Cm_q'] * adf_data['Cz_alpha_dot'] - adf_data['Cz_q'] * adf_data['Cm_alpha_dot']) - 2 * Iy_ad * adf_data['Cz_s'] * adf_data['Cx_alpha'])
+    
+    D = (2 * adf_data['Cz_s'] ** 2 * adf_data['Cm_alpha_dot'] + 2 * mu * (adf_data['Cx_u'] * adf_data['Cm_alpha'] - adf_data['Cx_alpha'] * adf_data['Cm_u'] - adf_data['Cz_s'] * adf_data['Cm_u']) + 
+         adf_data['Cx_u'] * (adf_data['Cm_alpha'] * adf_data['Cz_q'] - adf_data['Cm_q'] * adf_data['Cz_alpha']) -
+         adf_data['Cx_alpha'] * (adf_data['Cm_u'] * adf_data['Cz_q'] - adf_data['Cm_q'] * adf_data['Cz_u']) +
+         adf_data['Cz_s'] * (adf_data['Cm_u'] * adf_data['Cz_alpha_dot'] - adf_data['Cz_u'] * adf_data['Cm_alpha_dot']) + 2 * adf_data['Cz_s'] * adf_data['Cm_q'] * adf_data['Cx_alpha'])
+    
+    E = adf_data['Cz_s'] * (-adf_data['Cm_alpha'] * (2 * adf_data['Cz_s'] + adf_data['Cz_u']) + adf_data['Cm_u'] * adf_data['Cz_alpha'])
+    
+    L_ad = np.roots([A, B, C, D, E])
+    L = L_ad / (adf_data['c'] / (2 * kt_to_ms * adf_data['KTAS']))
+    
+    ind_ph = np.argmin(np.absolute(L.real))
+    ind_sp = np.argmax(np.absolute(L.real)) 
+    
     # PHUGOID
-    wn_ph_ad = ((adf_data['Cz_s'] * (2 * adf_data['Cz_s'] + adf_data['Cz_u'])) / (2 * mu * (2 * mu + adf_data['Cz_q']))) ** 0.5
-    wn_ph    = wn_ph_ad / (adf_data['c'] / (2 * kt_to_ms * adf_data['KTAS']))
+    lambda_ph = np.array([[L.real[ind_ph],  np.absolute(L.imag[ind_ph])],
+                          [L.real[ind_ph], -np.absolute(L.imag[ind_ph])]])
     
-    zeta_ph  = -(adf_data['Cx_u'] * (2 * mu + adf_data['Cz_q'])) / (2 * (adf_data['Cz_s'] * (2 * adf_data['Cz_s'] + adf_data['Cz_u']) * 2 * mu * (2 * mu + adf_data['Cz_q'])) ** 0.5)
+    wn_ph   = (lambda_ph[0,0] ** 2 + lambda_ph[0,1] ** 2) ** 0.5
+    zeta_ph = -lambda_ph[0,0] /((lambda_ph[0,0] ** 2 + lambda_ph[0,1] ** 2) ** 0.5)
     
-    lambda_r  = -zeta_ph * wn_ph
-    lambda_i  = wn_ph * (1 - zeta_ph ** 2) ** 0.5
-    lambda_ph = np.array([[lambda_r, lambda_i], [lambda_r, -lambda_i]])
+    #SHORT PERIOD
+    lambda_sp = np.array([[L.real[ind_sp],  np.absolute(L.imag[ind_sp])],
+                          [L.real[ind_sp], -np.absolute(L.imag[ind_sp])]])
     
-    #wn2 = 2 ** 0.5 * g / ( kt_to_ms * adf_data['KTAS']) 
-    #zeta2 = adf_data['Cx_u']/(2 * 2 ** 0.5 * adf_data['Cz_s'])
+    wn_sp   = (lambda_sp[0,0] ** 2 + lambda_sp[0,1] ** 2) ** 0.5
+    zeta_sp = -lambda_sp[0,0] /((lambda_sp[0,0] ** 2 + lambda_sp[0,1] ** 2) ** 0.5)
     
-    # SHORT PERIOD
-    wn_sp_ad = ((adf_data['Cz_alpha'] * adf_data['Cm_q'] - (2 * mu + adf_data['Cz_q']) * adf_data['Cm_alpha']) / ((2 * mu - adf_data['Cz_alpha_dot']) * Iy_ad)) ** 0.5
-    wn_sp    = wn_sp_ad / (adf_data['c'] / (2 * kt_to_ms * adf_data['KTAS']))
+    """ 
+    CONTROL
     
-    zeta_sp = -((2 * mu - adf_data['Cz_alpha_dot']) * adf_data['Cm_q'] + adf_data['Cz_alpha'] * Iy_ad + (2 * mu + adf_data['Cz_q']) * adf_data['Cm_alpha_dot']) / (2 * ((2 * mu - adf_data['Cz_alpha_dot']) * Iy_ad * (adf_data['Cz_alpha'] * adf_data['Cm_q'] - (2 * mu + adf_data['Cz_q']) * adf_data['Cm_alpha'])) ** 0.5)
+    """
+    s= symbols('s')
     
-    lambda_r  = -zeta_sp * wn_sp
-    lambda_i  = wn_sp * (1 - zeta_sp ** 2) ** 0.5
-    lambda_sp = np.array([[lambda_r, lambda_i], [lambda_r, -lambda_i]])
-
+    # Num
+    As = np.array([[               2*mu*s - adf_data['Cx_u'],                                      -adf_data['Cx_alpha'],               -adf_data['Cz_s']],
+                   [-(adf_data['Cz_u'] + 2*adf_data['Cz_s']), (2*mu - adf_data['Cz_alpha_dot'])*s - adf_data['Cz_alpha'],    -(2*mu + adf_data['Cz_q'])*s],
+                   [                       -adf_data['Cm_u'],       -(adf_data['Cm_alpha_dot']*s + adf_data['Cm_alpha']), Iy_ad*s**2 - adf_data['Cm_q']*s]])
+    Adj = []
+    ind = np.arange(3)
+    for i in range(3):
+        for j in range(3):
+            if (i+1 + j+1) % 2 == 0:
+                sign = 1
+            else:
+                sign = -1
+                
+            aux = As[ind != i]
+            aux = aux[:, ind != j]
+            pol = Poly(sign*(aux[0,0] * aux[1,1] - aux[0,1] * aux[1,0]), s)
+            
+            Adj.append(pol)
+            
+    Adj = np.reshape(Adj,[3,3])
+    
+    N_u_delta_e     = adf_data['Cx_delta_e'] * Adj[0,0] + adf_data['Cz_delta_e'] * Adj[1,0] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,0]
+    N_alpha_delta_e = adf_data['Cx_delta_e'] * Adj[0,1] + adf_data['Cz_delta_e'] * Adj[1,1] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,1]
+    N_theta_delta_e = adf_data['Cx_delta_e'] * Adj[0,2] + adf_data['Cz_delta_e'] * Adj[1,2] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,2]
+    
+    N_u_delta_e     = [float(N_u_delta_e.all_coeffs()[k]) for k in range(len(N_u_delta_e.all_coeffs()))]
+    N_alpha_delta_e = [float(N_alpha_delta_e.all_coeffs()[k]) for k in range(len(N_alpha_delta_e.all_coeffs()))]
+    N_theta_delta_e = [float(N_theta_delta_e.all_coeffs()[k]) for k in range(len(N_theta_delta_e.all_coeffs()))]
+    
+    # Den
+    Ds = [A, B, C, D, E]
+    
+    # Transfer function
+    G_u_delta_e     = (N_u_delta_e, Ds)
+    G_alpha_delta_e = (N_alpha_delta_e, Ds)
+    G_theta_delta_e = (N_theta_delta_e, Ds)
+    
+    #CHARTS
+    n_points = 500
+    height_in = 11.69
+    width_in  = 8.27
+    font_size = 15
+        
+    tf = [ G_u_delta_e,    G_alpha_delta_e,    G_theta_delta_e]
+    yl = ['$\\Delta$û', '$\\Delta\\alpha$', '$\\Delta\\theta$']
+    xl  = '$\^t$'
+                    
+    # Response to impulse
+    tit = 'Response to impulse\n $\\delta$e'
+    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_u' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_alpha' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_theta' + '.png']
+    for i in range(len(tf)):
+        t, y = signal.impulse(tf[i], N=n_points)
+        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+        ax1.plot(t, y) 
+        ax1.set_xlabel(xl, fontsize=font_size)
+        ax1.set_ylabel(yl[i], fontsize=font_size)
+        ax1.set_title(tit, fontsize=font_size)
+        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+        ax1.minorticks_on()
+        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+        ax1.tick_params(labelsize=font_size)
+        fig.tight_layout()
+        fig.savefig(fig_name[i])
+        plt.show()
+        
+    # Response to step
+    tit = 'Response to step\n $\\delta$e'
+    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_e_step_u' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_e_step_alpha' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_e_step_theta' + '.png']
+    for i in range(len(tf)):
+        t, y = signal.step(tf[i], N=n_points)
+        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+        ax1.plot(t, y) 
+        ax1.set_xlabel(xl, fontsize=font_size)
+        ax1.set_ylabel(yl[i], fontsize=font_size)
+        ax1.set_title(tit, fontsize=font_size)
+        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+        ax1.minorticks_on()
+        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+        ax1.tick_params(labelsize=font_size)
+        fig.tight_layout()
+        fig.savefig(fig_name[i])
+        plt.show()
+    
     return wn_ph, zeta_ph, lambda_ph, wn_sp, zeta_sp, lambda_sp 
 
 def calculate_dynamic_latdir(adf_data):
@@ -366,6 +483,8 @@ def calculate_dynamic_latdir(adf_data):
         wn_rs, lambda_rs: results for roll subsidence mode
         wn_spi, lambda_spi: results for spiral mode
         wn_dr, zeta_dr, lambda_dr: results for dutch roll mode
+        
+        control response charts
     
     """
     
@@ -373,30 +492,195 @@ def calculate_dynamic_latdir(adf_data):
     
     mu = adf_data['m'] / (0.5 * rho * adf_data['S'] *  adf_data['b'])
     
-    Ix_ad = adf_data['Ix'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
-    Iz_ad = adf_data['Iz'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
+    Ix_ad  = adf_data['Ix'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
+    Iz_ad  = adf_data['Iz'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
+    Jxz_ad = adf_data['Jxz'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
     
+    # STABILITY QUARTIC
+    
+    A = 2 * mu * (Ix_ad * Iz_ad - Jxz_ad ** 2)
+    
+    B = adf_data['Cy_beta'] * (Jxz_ad ** 2 - Ix_ad * Iz_ad) - 2 * mu *(Iz_ad * adf_data['Cl_p'] + Ix_ad * adf_data['Cn_r'] + Jxz_ad * (adf_data['Cl_r'] + adf_data['Cn_p']))
+    
+    C = (2 * mu * (adf_data['Cn_r'] * adf_data['Cl_p'] - adf_data['Cn_p'] * adf_data['Cl_r'] + Ix_ad * adf_data['Cn_beta'] + Jxz_ad * adf_data['Cl_beta']) + Ix_ad * (adf_data['Cy_beta'] * adf_data['Cn_r'] - adf_data['Cn_beta'] * adf_data['Cy_r']) +
+         Iz_ad * (adf_data['Cy_beta'] * adf_data['Cl_p'] - adf_data['Cl_beta'] * adf_data['Cy_p']) + Jxz_ad * (adf_data['Cy_beta'] * adf_data['Cn_p'] - adf_data['Cn_beta'] * adf_data['Cy_p'] + adf_data['Cl_r'] * adf_data['Cy_beta'] - adf_data['Cy_r'] * adf_data['Cl_beta']))
+    
+    D = (adf_data['Cy_beta'] * (adf_data['Cl_r'] * adf_data['Cn_p'] - adf_data['Cn_r'] * adf_data['Cl_p']) + adf_data['Cy_p'] * (adf_data['Cl_beta'] * adf_data['Cn_r'] - adf_data['Cn_beta'] * adf_data['Cl_r']) +
+         (2 * mu - adf_data['Cy_r']) * (adf_data['Cl_beta'] * adf_data['Cn_p'] - adf_data['Cn_beta'] * adf_data['Cl_p']) + adf_data['Cz_s'] * (Iz_ad * adf_data['Cl_beta'] + Jxz_ad * adf_data['Cn_beta']))
+    
+    E = -adf_data['Cz_s'] * (adf_data['Cl_beta'] * adf_data['Cn_r'] - adf_data['Cn_beta'] * adf_data['Cl_r'])
+    
+    L_ad = np.roots([A, B, C, D, E])
+    L = L_ad / (adf_data['b'] / (2 * kt_to_ms * adf_data['KTAS']))
+      
+    ind_dr  = np.argmax(np.absolute(L.imag))
+    
+    L_aux = L.real[L.imag== 0.0]
+    ind_rs  = np.argmax(np.absolute(L_aux))
+    ind_spi = np.argmin(np.absolute(L_aux))
+
     # ROLL SUBSIDENCE
-    lambda_rs_ad = adf_data['Cl_p'] / Ix_ad 
-    lambda_rs    = lambda_rs_ad/ (adf_data['b'] / (2 * kt_to_ms * adf_data['KTAS']))
+    lambda_rs = np.array([L_aux[ind_rs],  0.0])
     
-    wn_rs = lambda_rs
+    wn_rs   = lambda_rs[0]
     
     # SPIRAL
-    lambda_spi_ad = -(adf_data['Cz_s'] * (adf_data['Cl_beta'] * adf_data['Cn_r'] - adf_data['Cn_beta'] * adf_data['Cl_r'])) / ((2 * mu) * (adf_data['Cn_beta'] * adf_data['Cl_p'] - adf_data['Cl_beta'] * adf_data['Cn_p']) + adf_data['Cy_beta'] * (adf_data['Cl_p'] * adf_data['Cn_r'] - adf_data['Cn_p'] * adf_data['Cl_r']))
-    lambda_spi    = lambda_spi_ad/ (adf_data['b'] / (2 * kt_to_ms * adf_data['KTAS']))
+    lambda_spi = np.array([L_aux[ind_spi],  0.0])
     
-    wn_spi = lambda_spi
+    wn_spi   = lambda_spi[0]
     
     # DUTCH ROLL
-    wn_dr_ad = (adf_data['Cn_beta'] / Iz_ad) ** 0.5
-    wn_dr    = wn_dr_ad / (adf_data['b'] / (2 * kt_to_ms * adf_data['KTAS']))
+    lambda_dr = np.array([[L.real[ind_dr],  np.absolute(L.imag[ind_dr])],
+                          [L.real[ind_dr], -np.absolute(L.imag[ind_dr])]])
     
-    zeta_dr = -adf_data['Cn_r'] / (2 * (Iz_ad * adf_data['Cn_beta']) ** 0.5)
+    wn_dr   = (lambda_dr[0,0] ** 2 + lambda_dr[0,1] ** 2) ** 0.5
+    zeta_dr = -lambda_dr[0,0] /((lambda_dr[0,0] ** 2 + lambda_dr[0,1] ** 2) ** 0.5)
     
-    lambda_r  = -zeta_dr * wn_dr
-    lambda_i  = wn_dr * (1 - zeta_dr ** 2) ** 0.5
-    lambda_dr = np.array([[lambda_r, lambda_i], [lambda_r, -lambda_i]])
+    """ 
+    CONTROL
+    
+    """
+    s= symbols('s')
+    
+    # Num
+    As = np.array([[ 2*mu*s - adf_data['Cy_beta'], -(adf_data['Cy_p']*s - adf_data['Cz_s']),        2*mu - adf_data['Cy_r']],
+                   [         -adf_data['Cl_beta'],          Ix_ad*s**2 - adf_data['Cl_p']*s, -(Jxz_ad*s + adf_data['Cl_r'])],
+                   [         -adf_data['Cn_beta'],      -(Jxz_ad*s**2 + adf_data['Cn_p']*s),     Iz_ad*s - adf_data['Cn_r']]])
+    Adj = []
+    ind = np.arange(3)
+    for i in range(3):
+        for j in range(3):
+            if (i+1 + j+1) % 2 == 0:
+                sign = 1
+            else:
+                sign = -1
+                
+            aux = As[ind != i]
+            aux = aux[:, ind != j]
+            pol = Poly(sign*(aux[0,0] * aux[1,1] - aux[0,1] * aux[1,0]), s)
+            
+            Adj.append(pol)
+            
+    Adj = np.reshape(Adj,[3,3])
+    
+    N_beta_delta_a = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,0] + adf_data['Cn_delta_a'] * Adj[2,0]
+    N_phi_delta_a  = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,1] + adf_data['Cn_delta_a'] * Adj[2,1]
+    N_r_delta_a    = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,2] + adf_data['Cn_delta_a'] * Adj[2,2]
+    
+    N_beta_delta_a = [float(N_beta_delta_a.all_coeffs()[k]) for k in range(len(N_beta_delta_a.all_coeffs()))]
+    N_phi_delta_a  = [float(N_phi_delta_a.all_coeffs()[k]) for k in range(len(N_phi_delta_a.all_coeffs()))]
+    N_r_delta_a    = [float(N_r_delta_a.all_coeffs()[k]) for k in range(len(N_r_delta_a.all_coeffs()))]
+    
+    
+    N_beta_delta_r = adf_data['Cy_delta_r'] * Adj[0,0] + adf_data['Cl_delta_r'] * Adj[1,0] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,0]
+    N_phi_delta_r  = adf_data['Cy_delta_r'] * Adj[0,1] + adf_data['Cl_delta_r'] * Adj[1,1] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,1]
+    N_r_delta_r    = adf_data['Cy_delta_r'] * Adj[0,2] + adf_data['Cl_delta_r'] * Adj[1,2] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,2]
+    
+    N_beta_delta_r = [float(N_beta_delta_r.all_coeffs()[k]) for k in range(len(N_beta_delta_r.all_coeffs()))]
+    N_phi_delta_r  = [float(N_phi_delta_r.all_coeffs()[k]) for k in range(len(N_phi_delta_r.all_coeffs()))]
+    N_r_delta_r    = [float(N_r_delta_r.all_coeffs()[k]) for k in range(len(N_r_delta_r.all_coeffs()))]
+    
+    # Den
+    Ds = [A, B, C, D, E]
+    
+    # Transfer function
+    G_beta_delta_a = (N_beta_delta_a, Ds)
+    G_phi_delta_a  = (N_phi_delta_a, Ds)
+    G_r_delta_a    = (N_r_delta_a, Ds)
+    
+    G_beta_delta_r = (N_beta_delta_r, Ds)
+    G_phi_delta_r  = (N_phi_delta_r, Ds)
+    G_r_delta_r    = (N_r_delta_r, Ds)
+    
+    # CHARTS
+    n_points = 500
+    height_in = 11.69
+    width_in  = 8.27
+    font_size = 15
+        
+    tf_a = [   G_beta_delta_a,    G_phi_delta_a,    G_r_delta_a]
+    tf_r = [   G_beta_delta_r,    G_phi_delta_r,    G_r_delta_r]
+    yl   = ['$\\Delta\\beta$', '$\\Delta\\Phi$', '$\\Delta\\^r$']
+    xl   = '$\^t$'
+                  
+    # Response to impulse
+    tit = 'Response to impulse\n $\\delta$a'
+    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_beta' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_phi' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_r' + '.png']
+    for i in range(len(tf_a)):
+        t, y = signal.impulse(tf_a[i], N=n_points)
+        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+        ax1.plot(t, y) 
+        ax1.set_xlabel(xl, fontsize=font_size)
+        ax1.set_ylabel(yl[i], fontsize=font_size)
+        ax1.set_title(tit, fontsize=font_size)
+        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+        ax1.minorticks_on()
+        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+        ax1.tick_params(labelsize=font_size)
+        fig.tight_layout()
+        fig.savefig(fig_name[i])
+        plt.show()
+        
+    tit = 'Response to impulse\n $\\delta$r'
+    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_beta' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_phi' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_r' + '.png']    
+    for i in range(len(tf_r)):
+        t, y = signal.impulse(tf_r[i], N=n_points)
+        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+        ax1.plot(t, y) 
+        ax1.set_xlabel(xl, fontsize=font_size)
+        ax1.set_ylabel(yl[i], fontsize=font_size)
+        ax1.set_title(tit, fontsize=font_size)
+        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+        ax1.minorticks_on()
+        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+        ax1.tick_params(labelsize=font_size)
+        fig.tight_layout()
+        fig.savefig(fig_name[i])
+        plt.show()
+        
+    # Response to step
+    tit = 'Response to step\n $\\delta$a'
+    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_a_step_beta' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_a_step_phi' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_a_step_r' + '.png']
+    for i in range(len(tf_a)):
+        t, y = signal.step(tf_a[i], N=n_points)
+        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+        ax1.plot(t, y) 
+        ax1.set_xlabel(xl, fontsize=font_size)
+        ax1.set_ylabel(yl[i], fontsize=font_size)
+        ax1.set_title(tit, fontsize=font_size)
+        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+        ax1.minorticks_on()
+        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+        ax1.tick_params(labelsize=font_size)
+        fig.tight_layout()
+        fig.savefig(fig_name[i])
+        plt.show()
+        
+    tit = 'Response to step\n $\\delta$r'
+    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_r_step_beta' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_r_step_phi' + '.png',
+                out_data['file'][:-4] + '_dynamic_response_delta_r_step_r' + '.png']    
+    for i in range(len(tf_r)):
+        t, y = signal.step(tf_r[i], N=n_points)
+        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+        ax1.plot(t, y) 
+        ax1.set_xlabel(xl, fontsize=font_size)
+        ax1.set_ylabel(yl[i], fontsize=font_size)
+        ax1.set_title(tit, fontsize=font_size)
+        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+        ax1.minorticks_on()
+        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+        ax1.tick_params(labelsize=font_size)
+        fig.tight_layout()
+        fig.savefig(fig_name[i])
+        plt.show()
+
 
     return wn_rs, lambda_rs, wn_spi, lambda_spi, wn_dr, zeta_dr, lambda_dr
     
@@ -614,7 +898,7 @@ def write_output_file(out_data, input_data):
             f.write('{:^80s}'.format('DYNAMIC - LONGITUDINAL') + '\n')
             f.write(lines)
             
-            # Phugoid
+            # Modes
             f.write('Modes:\n')  
             f.write('{:10.4f}'.format(out_data['lambda_ph'][0,0]) + '{:+8.4f}'.format(out_data['lambda_ph'][0,1]) + 'j\n')
             f.write('{:10.4f}'.format(out_data['lambda_ph'][1,0]) + '{:+8.4f}'.format(out_data['lambda_ph'][1,1]) + 'j\n')
@@ -622,11 +906,13 @@ def write_output_file(out_data, input_data):
             f.write('{:10.4f}'.format(out_data['lambda_sp'][1,0]) + '{:+8.4f}'.format(out_data['lambda_sp'][1,1]) + 'j\n')
             f.write('\n')
             
+            # Phugoid
             f.write('Phugoid:\n')
             f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_ph']) + '\n')
             f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_ph']) + '\n')
             f.write('\n')
             
+            # Short period
             f.write('Short period:\n')
             f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_sp']) + '\n')
             f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_sp']) + '\n')
@@ -634,28 +920,31 @@ def write_output_file(out_data, input_data):
             
             f.write('\n')
             
-        # DYNAMIC - LONGITUDINAL 
+        # DYNAMIC - LATERAL/DIRECTIONAL 
         if input_data['type'] == 4 or input_data['type'] == 0:
             f.write(lines)
             f.write('{:^80s}'.format('DYNAMIC - LATERAL/DIRECTIONAL') + '\n')
             f.write(lines)
             
-            # Phugoid
+            # Modes
             f.write('Modes:\n')  
-            f.write('{:10.4f}'.format(out_data['lambda_rs']) + '{:+8.4f}'.format(0.0) + 'j\n')
-            f.write('{:10.4f}'.format(out_data['lambda_spi']) + '{:+8.4f}'.format(0.0) + 'j\n')
+            f.write('{:10.4f}'.format(out_data['lambda_rs'][0]) + '{:+8.4f}'.format(out_data['lambda_rs'][1]) + 'j\n')
+            f.write('{:10.4f}'.format(out_data['lambda_spi'][0]) + '{:+8.4f}'.format(out_data['lambda_spi'][1]) + 'j\n')
             f.write('{:10.4f}'.format(out_data['lambda_dr'][0,0]) + '{:+8.4f}'.format(out_data['lambda_dr'][0,1]) + 'j\n')
             f.write('{:10.4f}'.format(out_data['lambda_dr'][1,0]) + '{:+8.4f}'.format(out_data['lambda_dr'][1,1]) + 'j\n')
             f.write('\n')
             
+            # Roll subsidence
             f.write('Roll subsidence:\n')
             f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_rs']) + '\n')
             f.write('\n')
             
+            # Spiral
             f.write('Spiral:\n')
             f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_spi']) + '\n')
             f.write('\n')
             
+            # Dutch roll
             f.write('Dutch roll:\n')
             f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_dr']) + '\n')
             f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_dr']) + '\n')
