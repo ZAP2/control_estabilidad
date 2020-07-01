@@ -15,7 +15,7 @@
 #                         the total thrust shall be constant         #
 #                                                                    #
 #           Static - longitudinal                                    #
-#                 alpha : Angle of atack (deg).                      #
+#                 alpha : Angle of attack (deg).                     #
 #                         Define to get elevator sensitivity         #
 #                         (optional)                                 #
 #                                                                    #
