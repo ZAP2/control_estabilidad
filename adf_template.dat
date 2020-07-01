@@ -43,7 +43,7 @@
 #                             PROPULSION                             #
 #                                                                    #
 #               T : Engine thrust (N)                                #
-#         epsilon : Engine angle of atack (deg)                      #
+#         epsilon : Engine angle of attack (deg)                     #
 #              ni : Engine sideslip angle (deg)                      #
 #          d_CG_x : X distance to the CG (m)                         #
 #          d_CG_y : Y distance to the CG (m)                         #
