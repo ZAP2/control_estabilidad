@@ -27,6 +27,9 @@
 #              Iy : Moment of inertia about Y axis (kg*m2)           #
 #              Iz : Moment of inertia about Z axis (kg*m2)           #
 #             Jxz : Product of inertia about XZ axes (kg*m2)         #
+#                                                                    #
+#     delta_a_max : Maximum aileron deflection (deg)                 #
+#     delta_r_max : Maximum rudder deflection  (deg)                 #
 
                 m : 288773.0
 
@@ -38,26 +41,51 @@
                Iy : 44900000.0
                Iz : 67300000.0
               Jxz : -2120000.0
+			  
+      delta_a_max : 25
+      delta_r_max : 15
                                                                      
 ######################################################################
 #                             PROPULSION                             #
 #                                                                    #
+#   Note: engine positions are numbered from left to right from      #
+#   the point of view of the pilot looking forward                   #
 #               T : Engine thrust (N)                                #
 #         epsilon : Engine angle of attack (deg)                     #
 #              ni : Engine sideslip angle (deg)                      #
-#          d_CG_x : X distance to the CG (m)                         #
-#          d_CG_y : Y distance to the CG (m)                         #
-#          d_CG_z : Z distance to the CG (m)                         #
+#           eng_x : X distance to the CG (m)                         #
+#           eng_y : Y distance to the CG (m)                         #
+#           eng_z : Z distance to the CG (m)                         #
       
                 T :  44550.0,  44550.0,  44550.0,  44550.0
           epsilon :      0.0,      0.0,      0.0,      0.0
                ni :      0.0,      0.0,      0.0,      0.0
-           d_CG_x :    -13.2,     -4.8,     -4.8,    -13.2
-           d_CG_y :    -21.3,    -12.1,     12.1,     21.3
-           d_CG_z :    2.331,    2.941,    2.941,    2.331
-	   
+            eng_x :     -6.3,      2.1,      2.1,     -6.3
+            eng_y :    -21.3,    -12.1,     12.1,     21.3
+            eng_z :    2.331,    2.941,    2.941,    2.331
+
+######################################################################
+#                           LANDING GEAR                             #
+#                                                                    #
+#   Note: Landing gear positions are numbered from from to back      #
+#   and from left to right from the point of view of the pilot       #
+#   looking forward                                                  #
+#            lg_x : X distance to the CG (m)                         #
+#            lg_y : Y distance to the CG (m)                         #
+#            lg_z : Z distance to the CG (m)                         #
+#                                                                    #
+#           mu_gr : Rolling friction coefficient (-)                 #
+      
+             lg_x : 14.25, -11.35, -11.35
+             lg_y :  0.00,  -5.50,   5.50
+             lg_z :  4.89,   4.89,   4.89 
+
+			mu_gr : 0.025 
+			
 ######################################################################
 #                            AERODYNAMICS                            #
+#                                                                    #
+#          CL_max : Maximum lift coefficient                         #
 #                                                                    #
 #                      Longitudinal derivatives                      #
 #                  Cx             Cz             Cm                  #
@@ -80,6 +108,8 @@
 #    delta_a |   Cy_delta_a     Cl_delta_a     Cn_delta_a            #
 #    delta_r |   Cy_delta_r     Cl_delta_r     Cn_delta_r            #
 #                                                                    #
+
+           CL_max : 1.65
 
              Cz_0 : -0.298
              Cm_0 : -0.047
@@ -121,6 +151,6 @@
        Cl_delta_a : 0.0137
        Cn_delta_a : 0.0002
 
-       Cy_delta_r : 0.11465
-       Cl_delta_r : 0.007
-       Cn_delta_r : -0.1256
+       Cy_delta_r : -0.11465
+       Cl_delta_r : -0.007
+       Cn_delta_r : 0.1256

@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sympy import symbols, Poly
 from scipy import signal
+from scipy.optimize import fsolve
 
 
 def read_input_file(file):
@@ -60,7 +61,8 @@ def read_adf_file(file):
     adf_data = {}      
     for index, title in enumerate(variable_name):
         if (title == 'T' or title == 'epsilon' or title == 'ni' or 
-            title == 'd_CG_x' or title == 'd_CG_y' or title == 'd_CG_z'):
+            title == 'eng_x' or title == 'eng_y' or title == 'eng_z' or
+            title == 'lg_x' or title == 'lg_y' or title == 'lg_z'):
             adf_data[title] = np.array(variable_data[index])
         else:
             adf_data[title] = np.array(variable_data[index])[0]
@@ -169,6 +171,22 @@ def get_dynamic_pressure(rho,speed):
     
     return p_d
 
+def get_stall_speed(adf_data):
+    """
+    This function calculates the reference stall speed (Vsr)
+    
+    Inputs:
+        adf_data: dictionary with the aircraft data
+        
+    Outputs:
+        Vsr: reference stall speed (m/s)
+
+    """
+    rho = get_density(feet_to_meters*adf_data['altitude'])
+    Vsr = ((adf_data['m']*g)/(0.5*rho*adf_data['S']*adf_data['CL_max']))**0.5
+
+    return Vsr
+
 def calculate_static_long(adf_data, input_data):
     """
     This function calculates the static longitudinal stability and control
@@ -195,8 +213,8 @@ def calculate_static_long(adf_data, input_data):
     Ft_z = sum(-adf_data['T'][i] * math.sin(np.radians(adf_data['epsilon'][i]))  for i in range(n_engines))
 
     
-    Mt_y = sum(adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['d_CG_z'][i] +
-               math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['d_CG_x'][i]) for i in range(n_engines))
+    Mt_y = sum(adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+               math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_x'][i]) for i in range(n_engines))
     """
     
     # TRIM
@@ -208,7 +226,7 @@ def calculate_static_long(adf_data, input_data):
                   [adf_data['Cm_alpha'], adf_data['Cm_delta_e']]])
     
     """
-    B = np.array([[(adf_data['m'] * g + Ft_z) / (p_d * adf_data['S']) - adf_data['Cz_0']],
+    B = np.array([[(adf_data['m'] * g + Ft_z) / (p_d * adf_data['S']) - adf_data['CL_0']],
                   [-Mt_y / (p_d * adf_data['S'] * adf_data['c']) -adf_data['Cm_0']]])
     """
     B = np.array([[(adf_data['m'] * g) / (p_d * adf_data['S']) - CL_0],
@@ -220,14 +238,10 @@ def calculate_static_long(adf_data, input_data):
     delta_e_trim = np.degrees(X[1])[0]
     
     # CONTROL
-    # Cinematic momentum in Y axis
-    #M_y = 0.0
-
-    # Calculate elevator deflection for balance
     if 'alpha' in input_data:
         delta_e = np.array([])
         for alpha in input_data['alpha']:
-            #d_e = ((M_y - Mt_y) / (p_d * adf_data['S'] * adf_data['c']) - adf_data['Cm_0'] - adf_data['Cm_alpha'] * (np.radians(alpha))) / adf_data['Cm_delta_e']
+            #d_e = ((- Mt_y) / (p_d * adf_data['S'] * adf_data['c']) - adf_data['Cm_0'] - adf_data['Cm_alpha'] * (np.radians(alpha))) / adf_data['Cm_delta_e']
             d_e = (- adf_data['Cm_0'] - adf_data['Cm_alpha'] * (np.radians(alpha))) / adf_data['Cm_delta_e']
     
             delta_e = np.append(delta_e, np.degrees(d_e))
@@ -260,11 +274,11 @@ def calculate_static_latdir(adf_data, input_data):
     
     Ft_y = sum(input_data['T_rate'][i] * adf_data['T'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in range(n_engines))
     
-    Lt   = sum(-input_data['T_rate'][i] * adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['d_CG_z'][i] +
-             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['d_CG_y'][i]) for i in range(n_engines))
+    Lt   = sum(-input_data['T_rate'][i] * adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in range(n_engines))
     
-    Nt   = sum(input_data['T_rate'][i] * adf_data['T'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['d_CG_y'][i] +
-             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['d_CG_x'][i]) for i in range(n_engines))
+    Nt   = sum(input_data['T_rate'][i] * adf_data['T'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
+             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in range(n_engines))
     
     # TRIM 
     phi_b     = np.array([])
@@ -338,28 +352,20 @@ def calculate_dynamic_long(adf_data):
     
     Iy_ad = adf_data['Iy'] / (rho * adf_data['S'] * (adf_data['c'] / 2) ** 3)
     
+    s= symbols('s')
+
     # STABILITY QUARTIC
+    As = np.array([[               2*mu*s - adf_data['Cx_u'],                                      -adf_data['Cx_alpha'],               -adf_data['Cz_s']],
+                   [-(adf_data['Cz_u'] + 2*adf_data['Cz_s']), (2*mu - adf_data['Cz_alpha_dot'])*s - adf_data['Cz_alpha'],    -(2*mu + adf_data['Cz_q'])*s],
+                   [                       -adf_data['Cm_u'],       -(adf_data['Cm_alpha_dot']*s + adf_data['Cm_alpha']), Iy_ad*s**2 - adf_data['Cm_q']*s]])
+
+    stability_quartic = Poly(As[0,0]*As[1,1]*As[2,2] + As[0,1]*As[1,2]*As[2,0] + As[0,2]*As[1,0]*As[2,1] - (As[0,2]*As[1,1]*As[2,0] + As[0,1]*As[1,0]*As[2,2] + As[0,0]*As[1,2]*As[2,1]),s)
     
-    A = 2 * mu * Iy_ad *(2 * mu - adf_data['Cz_alpha_dot'])
-    
-    B = (-2 * mu * Iy_ad * (adf_data['Cz_alpha'] + adf_data['Cx_u']) + Iy_ad * adf_data['Cx_u'] * adf_data['Cz_alpha_dot']
-         -2 * mu * (adf_data['Cz_q'] * adf_data['Cm_alpha_dot'] - adf_data['Cm_q'] * adf_data['Cz_alpha_dot']) 
-         -4 * mu ** 2 * (adf_data['Cm_alpha_dot'] + adf_data['Cm_q']))
-    
-    C = (Iy_ad * (adf_data['Cx_u'] * adf_data['Cz_alpha'] - adf_data['Cx_alpha'] * adf_data['Cz_u']) +
-         2 * mu * (adf_data['Cz_alpha'] * adf_data['Cm_q'] - adf_data['Cm_alpha'] * adf_data['Cz_q'] + adf_data['Cx_u'] * adf_data['Cm_q'] + adf_data['Cx_u'] * adf_data['Cm_alpha_dot'])
-         - 4 * mu ** 2 * adf_data['Cm_alpha'] - adf_data['Cx_u'] * (adf_data['Cm_q'] * adf_data['Cz_alpha_dot'] - adf_data['Cz_q'] * adf_data['Cm_alpha_dot']) - 2 * Iy_ad * adf_data['Cz_s'] * adf_data['Cx_alpha'])
-    
-    D = (2 * adf_data['Cz_s'] ** 2 * adf_data['Cm_alpha_dot'] + 2 * mu * (adf_data['Cx_u'] * adf_data['Cm_alpha'] - adf_data['Cx_alpha'] * adf_data['Cm_u'] - adf_data['Cz_s'] * adf_data['Cm_u']) + 
-         adf_data['Cx_u'] * (adf_data['Cm_alpha'] * adf_data['Cz_q'] - adf_data['Cm_q'] * adf_data['Cz_alpha']) -
-         adf_data['Cx_alpha'] * (adf_data['Cm_u'] * adf_data['Cz_q'] - adf_data['Cm_q'] * adf_data['Cz_u']) +
-         adf_data['Cz_s'] * (adf_data['Cm_u'] * adf_data['Cz_alpha_dot'] - adf_data['Cz_u'] * adf_data['Cm_alpha_dot']) + 2 * adf_data['Cz_s'] * adf_data['Cm_q'] * adf_data['Cx_alpha'])
-    
-    E = adf_data['Cz_s'] * (-adf_data['Cm_alpha'] * (2 * adf_data['Cz_s'] + adf_data['Cz_u']) + adf_data['Cm_u'] * adf_data['Cz_alpha'])
+    [A,B,C,D,E] = [float(stability_quartic.all_coeffs()[k]) for k in range(len(stability_quartic.all_coeffs()))]
     
     L_ad = np.roots([A, B, C, D, E])
     L = L_ad / (adf_data['c'] / (2 * kt_to_ms * adf_data['KTAS']))
-    
+
     ind_ph = np.argmin(np.absolute(L.real))
     ind_sp = np.argmax(np.absolute(L.real)) 
     
@@ -380,13 +386,8 @@ def calculate_dynamic_long(adf_data):
     """ 
     CONTROL
     
-    """
-    s= symbols('s')
-    
+    """  
     # Num
-    As = np.array([[               2*mu*s - adf_data['Cx_u'],                                      -adf_data['Cx_alpha'],               -adf_data['Cz_s']],
-                   [-(adf_data['Cz_u'] + 2*adf_data['Cz_s']), (2*mu - adf_data['Cz_alpha_dot'])*s - adf_data['Cz_alpha'],    -(2*mu + adf_data['Cz_q'])*s],
-                   [                       -adf_data['Cm_u'],       -(adf_data['Cm_alpha_dot']*s + adf_data['Cm_alpha']), Iy_ad*s**2 - adf_data['Cm_q']*s]])
     Adj = []
     ind = np.arange(3)
     for i in range(3):
@@ -428,7 +429,7 @@ def calculate_dynamic_long(adf_data):
         
     tf = [ G_u_delta_e,    G_alpha_delta_e,    G_theta_delta_e]
     yl = ['$\\Delta$û', '$\\Delta\\alpha$', '$\\Delta\\theta$']
-    xl  = '$\^t$'
+    xl = '$\\^t$'
                     
     # Response to impulse
     tit = 'Response to impulse\n $\\delta$e'
@@ -448,7 +449,7 @@ def calculate_dynamic_long(adf_data):
         ax1.tick_params(labelsize=font_size)
         fig.tight_layout()
         fig.savefig(fig_name[i])
-        plt.show()
+        #plt.show()
         
     # Response to step
     tit = 'Response to step\n $\\delta$e'
@@ -468,7 +469,7 @@ def calculate_dynamic_long(adf_data):
         ax1.tick_params(labelsize=font_size)
         fig.tight_layout()
         fig.savefig(fig_name[i])
-        plt.show()
+        #plt.show()
     
     return wn_ph, zeta_ph, lambda_ph, wn_sp, zeta_sp, lambda_sp 
 
@@ -496,19 +497,16 @@ def calculate_dynamic_latdir(adf_data):
     Iz_ad  = adf_data['Iz'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
     Jxz_ad = adf_data['Jxz'] / (rho * adf_data['S'] * (adf_data['b'] / 2) ** 3)
     
+    s= symbols('s')
+
     # STABILITY QUARTIC
+    As = np.array([[ 2*mu*s - adf_data['Cy_beta'], -(adf_data['Cy_p']*s - adf_data['Cz_s']),        2*mu - adf_data['Cy_r']],
+                   [         -adf_data['Cl_beta'],          Ix_ad*s**2 - adf_data['Cl_p']*s, -(Jxz_ad*s + adf_data['Cl_r'])],
+                   [         -adf_data['Cn_beta'],      -(Jxz_ad*s**2 + adf_data['Cn_p']*s),     Iz_ad*s - adf_data['Cn_r']]])
     
-    A = 2 * mu * (Ix_ad * Iz_ad - Jxz_ad ** 2)
+    stability_quartic = Poly(As[0,0]*As[1,1]*As[2,2] + As[0,1]*As[1,2]*As[2,0] + As[0,2]*As[1,0]*As[2,1] - (As[0,2]*As[1,1]*As[2,0] + As[0,1]*As[1,0]*As[2,2] + As[0,0]*As[1,2]*As[2,1]),s)
     
-    B = adf_data['Cy_beta'] * (Jxz_ad ** 2 - Ix_ad * Iz_ad) - 2 * mu *(Iz_ad * adf_data['Cl_p'] + Ix_ad * adf_data['Cn_r'] + Jxz_ad * (adf_data['Cl_r'] + adf_data['Cn_p']))
-    
-    C = (2 * mu * (adf_data['Cn_r'] * adf_data['Cl_p'] - adf_data['Cn_p'] * adf_data['Cl_r'] + Ix_ad * adf_data['Cn_beta'] + Jxz_ad * adf_data['Cl_beta']) + Ix_ad * (adf_data['Cy_beta'] * adf_data['Cn_r'] - adf_data['Cn_beta'] * adf_data['Cy_r']) +
-         Iz_ad * (adf_data['Cy_beta'] * adf_data['Cl_p'] - adf_data['Cl_beta'] * adf_data['Cy_p']) + Jxz_ad * (adf_data['Cy_beta'] * adf_data['Cn_p'] - adf_data['Cn_beta'] * adf_data['Cy_p'] + adf_data['Cl_r'] * adf_data['Cy_beta'] - adf_data['Cy_r'] * adf_data['Cl_beta']))
-    
-    D = (adf_data['Cy_beta'] * (adf_data['Cl_r'] * adf_data['Cn_p'] - adf_data['Cn_r'] * adf_data['Cl_p']) + adf_data['Cy_p'] * (adf_data['Cl_beta'] * adf_data['Cn_r'] - adf_data['Cn_beta'] * adf_data['Cl_r']) +
-         (2 * mu - adf_data['Cy_r']) * (adf_data['Cl_beta'] * adf_data['Cn_p'] - adf_data['Cn_beta'] * adf_data['Cl_p']) + adf_data['Cz_s'] * (Iz_ad * adf_data['Cl_beta'] + Jxz_ad * adf_data['Cn_beta']))
-    
-    E = -adf_data['Cz_s'] * (adf_data['Cl_beta'] * adf_data['Cn_r'] - adf_data['Cn_beta'] * adf_data['Cl_r'])
+    [A,B,C,D,E] = [float(stability_quartic.all_coeffs()[k]) for k in range(len(stability_quartic.all_coeffs()))]
     
     L_ad = np.roots([A, B, C, D, E])
     L = L_ad / (adf_data['b'] / (2 * kt_to_ms * adf_data['KTAS']))
@@ -540,12 +538,7 @@ def calculate_dynamic_latdir(adf_data):
     CONTROL
     
     """
-    s= symbols('s')
-    
     # Num
-    As = np.array([[ 2*mu*s - adf_data['Cy_beta'], -(adf_data['Cy_p']*s - adf_data['Cz_s']),        2*mu - adf_data['Cy_r']],
-                   [         -adf_data['Cl_beta'],          Ix_ad*s**2 - adf_data['Cl_p']*s, -(Jxz_ad*s + adf_data['Cl_r'])],
-                   [         -adf_data['Cn_beta'],      -(Jxz_ad*s**2 + adf_data['Cn_p']*s),     Iz_ad*s - adf_data['Cn_r']]])
     Adj = []
     ind = np.arange(3)
     for i in range(3):
@@ -601,7 +594,7 @@ def calculate_dynamic_latdir(adf_data):
     tf_a = [   G_beta_delta_a,    G_phi_delta_a,    G_r_delta_a]
     tf_r = [   G_beta_delta_r,    G_phi_delta_r,    G_r_delta_r]
     yl   = ['$\\Delta\\beta$', '$\\Delta\\Phi$', '$\\Delta\\^r$']
-    xl   = '$\^t$'
+    xl   = '$\\^t$'
                   
     # Response to impulse
     tit = 'Response to impulse\n $\\delta$a'
@@ -621,7 +614,7 @@ def calculate_dynamic_latdir(adf_data):
         ax1.tick_params(labelsize=font_size)
         fig.tight_layout()
         fig.savefig(fig_name[i])
-        plt.show()
+        #plt.show()
         
     tit = 'Response to impulse\n $\\delta$r'
     fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_beta' + '.png',
@@ -640,7 +633,7 @@ def calculate_dynamic_latdir(adf_data):
         ax1.tick_params(labelsize=font_size)
         fig.tight_layout()
         fig.savefig(fig_name[i])
-        plt.show()
+        #plt.show()
         
     # Response to step
     tit = 'Response to step\n $\\delta$a'
@@ -660,7 +653,7 @@ def calculate_dynamic_latdir(adf_data):
         ax1.tick_params(labelsize=font_size)
         fig.tight_layout()
         fig.savefig(fig_name[i])
-        plt.show()
+        #plt.show()
         
     tit = 'Response to step\n $\\delta$r'
     fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_r_step_beta' + '.png',
@@ -679,11 +672,84 @@ def calculate_dynamic_latdir(adf_data):
         ax1.tick_params(labelsize=font_size)
         fig.tight_layout()
         fig.savefig(fig_name[i])
-        plt.show()
+        #plt.show()
 
 
     return wn_rs, lambda_rs, wn_spi, lambda_spi, wn_dr, zeta_dr, lambda_dr
+
+def calculate_vmcg(adf_data):
+    """
+    This function calculates the minimum control speed on ground (VMCG)
+    For the Take-off thrust at SL and ISA conditions
     
+    Inputs:
+        adf_data: dictionary with the aircraft data
+        
+    Outputs:
+        V: VMC (kt)
+
+    """
+    delta_r = -np.radians(adf_data['delta_r_max']) # Right engine out
+    rho     = get_density(feet_to_meters*adf_data['altitude'])
+    n_lg    = len(adf_data['lg_x'])
+    Vsr     = get_stall_speed(adf_data)
+
+    # Propulsion
+    n_engines = len(adf_data['T']) - 1 # Right engine out
+    
+    Ft_y = sum(adf_data['T'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in range(n_engines))
+    Ft_z = sum(-adf_data['T'][i] * math.sin(np.radians(adf_data['epsilon'][i]))  for i in range(n_engines))
+
+    Lt = sum(adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in range(n_engines))
+    Mt = sum(adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_x'][i]) for i in range(n_engines))
+    Nt = sum(adf_data['T'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
+             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in range(n_engines))
+    
+    # First aproximation
+    def equations_aprox(var):
+        V, beta = var
+
+        eq2 = Ft_y + 0.5*rho*V**2*adf_data['S']*(adf_data['Cy_beta']*beta + adf_data['Cy_delta_r']*delta_r)
+        eq6 = Nt + 0.5*rho*V**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta']*beta + adf_data['Cn_delta_r']*delta_r)
+
+        return [eq2, eq6]
+
+    ini_aprox = [0.8*Vsr, 0.]
+    V_ini, beta_ini = fsolve(equations_aprox, ini_aprox)
+
+    # Final system (with LG effect)
+    # x = [V, beta, K_lg, W]
+    def equations(var):
+        x = var
+
+        eq2 = Ft_y + 0.5*rho*x[0]**2*adf_data['S']*(adf_data['Cy_beta']*x[1] + adf_data['Cy_delta_r']*delta_r) + x[2]*x[1]*sum(x[3+i] for i in range(n_lg))
+        eq3 = Ft_z + adf_data['m']*g + 0.5*rho*x[0]**2*adf_data['S']*adf_data['Cz_0'] + sum(x[3+i] for i in range(n_lg))
+        eq4 = Lt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cl_beta']*x[1] + adf_data['Cl_delta_r']*delta_r) + sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) - x[2]*x[1]*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
+        eq5 = Mt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['c']*adf_data['Cm_0'] - sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg)) + adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
+        eq6 = Nt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta']*x[1] + adf_data['Cn_delta_r']*delta_r) - adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) + x[2]*x[1]*sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg))
+        eq7 = -x[2] + 2369.074348*abs(x[1])**5 - 1268.0219021*abs(x[1])**4 + 24.6344543*abs(x[1])**3 + 3.1599044*abs(x[1])**2 + 5.2489678*abs(x[1]) + 0.0086458
+
+        return [eq2, eq3, eq4, eq5, eq6, eq7]
+
+    ini    = np.empty(3 + n_lg)
+    ini[:] = np.nan
+
+    ini[0]  = V_ini
+    ini[1]  = beta_ini
+    ini[2]  = 2369.074348*abs(beta_ini)**5 - 1268.0219021*abs(beta_ini)**4 + 24.6344543*abs(beta_ini)**3 + 3.1599044*abs(beta_ini)**2 + 5.2489678*abs(beta_ini) + 0.0086458
+    ini[3:] = [adf_data['m']*g/n_lg for i in range(n_lg)]
+    
+    x = fsolve(equations, ini)
+    
+    V = x[0]/kt_to_ms
+    beta = np.degrees(x[1])
+    K_lg = x[2]
+    W = x[3:]
+
+    return V
+
 def plot_out_static(out_data):
     """ 
     This function plot the calculated outputs
@@ -951,6 +1017,22 @@ def write_output_file(out_data, input_data):
             f.write('\n')
             
             f.write('\n')
+
+        # MINIMUM SPEEDS
+        if input_data['type'] == 5 or input_data['type'] == 0:
+            f.write(lines)
+            f.write('{:^80s}'.format('MINIMUM SPEEDS') + '\n')
+            f.write(lines)
+
+            # Vsr
+            f.write('{:>11s}'.format('Vsr :') + '{:8.3f}'.format(out_data['Vsr']/kt_to_ms) + ' kt\n')
+            f.write('\n')
+
+            # VMCG
+            f.write('{:>11s}'.format('VMCG :') + '{:8.3f}'.format(out_data['VMCG']) + ' kt\n')
+            f.write('\n')
+            
+            # VMCA
                                   
 """
 MAIN PROGRAM
@@ -969,8 +1051,13 @@ feet_to_meters = 0.3048
 kt_to_ms       = 0.514444
 g              = 9.80665
 
+################################################################################
+#                                    INPUT                                     #
+################################################################################
 # Define input file path
-file = './study/HS.dat'
+file = './study/LS.dat'
+
+################################################################################
 
 # Read input and aircraft data
 input_data, adf_data = read_input_file(file)
@@ -997,9 +1084,14 @@ if input_data['type'] == 3 or input_data['type'] == 0:
 # Dynamic - longitudinal 
 if input_data['type'] == 4 or input_data['type'] == 0:
     out_data['wn_rs'], out_data['lambda_rs'], out_data['wn_spi'], out_data['lambda_spi'], out_data['wn_dr'], out_data['zeta_dr'], out_data['lambda_dr'] = calculate_dynamic_latdir(adf_data)    
-    
+
+# Minimum control speeds
+if input_data['type'] == 5 or input_data['type'] == 0: 
+    out_data['Vsr']  = get_stall_speed(adf_data) 
+    out_data['VMCG'] = calculate_vmcg(adf_data)
+    #out_data['VMCA'] = calculate_vmca(adf_data)
       
-# Print results   
+# PRINT RESULTS   
 write_output_file(out_data, input_data)
 
 """

@@ -9,6 +9,7 @@
 #                         2 : Static - Lateral-Directional           #
 #                         3 : Dynamic - Longitudinal                 #
 #                         4 : Dynamic - Lateral-Directional          #
+#                         5 : Minimum Speeds                         #
 #                                                                    #
 #                T_rate : Thrust rate control for each engine.       #
 #                         When modifying the unitary engine thrusts  #
@@ -36,5 +37,5 @@
                   alpha :  -5.0, 0.0, 5.0, 10.0, 15.0
 
 #           Static - lateral/directional
-                    phi : 30.0, 60.0
+                    phi : 15.0, 30.0
                    beta :  1.0,  3.0
