@@ -94,7 +94,7 @@
 ######################################################################
 #                           LANDING GEAR                             #
 #                                                                    #
-#   Note: Landing gear positions are numbered from from to back      #
+#   Note: Landing gear positions are numbered from front to back      #
 #   and from left to right from the point of view of the pilot       #
 #   looking forward                                                  #
 #            lg_x : X distance to the CG (m)                         #
