@@ -1,73 +1,100 @@
 ######################################################################
 #                                                                    #
 #                          Boeing 747                                #
-#                          High speed                                #
 #                                                                    #
 ######################################################################
 
 ######################################################################
 #                        REFERENCE CONDITIONS                        #
 #                                                                    #
+#    n_conditions : number of conditions defined in the ADF          #
+#                                                                    #
 #        altitude : Flight altitude (ft)                             #
 #           speed : Speed (Mach / KTAS)                              #
 
-         altitude : 40000.0
-            speed : 0.8  
+     n_conditions : 2
+
+#                     LS       HS
+#                  -------- --------
+         altitude :     0.0, 40000.0
+            speed :    0.25,    0.80  
 
 ######################################################################
 #                              GEOMETRY                              #
 #                                                                    #
-#               m : Weight (kg)                                      #
+#         TOW_min : Minimum take-off weight (kg)                     #
+#         TOW_max : Maximum take-off_weight (kg)                     #
+#          LW_min : Minimum landing weight (kg)                      #
+#          LW_max : Maximum landing weight (kg)                      #
+#              dW : Weight increment for VMC calculations            #
+#                                                                    #
+#     delta_a_max : Maximum aileron deflection (deg)                 #
+#     delta_r_max : Maximum rudder deflection  (deg)                 #
 #                                                                    #
 #               S : Wing surface (m2)                                #
 #               c : Mean aerodynamic chord (m)                       #
 #               b : Wingspan (m)                                     #
+#                                                                    #
+#               m : Current weight (kg)                              #
 #                                                                    #
 #              Ix : Moment of inertia about X axis (kg*m2)           #
 #              Iy : Moment of inertia about Y axis (kg*m2)           #
 #              Iz : Moment of inertia about Z axis (kg*m2)           #
 #             Jxz : Product of inertia about XZ axes (kg*m2)         #
 #                                                                    #
-#     delta_a_max : Maximum aileron deflection (deg)                 #
-#     delta_r_max : Maximum rudder deflection  (deg)                 #
 
-                m : 288773.0
+          TOW_min : 250000.0
+          TOW_max : 390000.0
+           LW_min : 195000.0
+           LW_max : 295000.0
+               dW :  10000.0
+
+      delta_a_max : 30
+      delta_r_max : 30
 
                 S : 511.0
                 c : 8.324
                 b : 59.64
 
-               Ix : 24700000.0
-               Iy : 44900000.0
-               Iz : 67300000.0
-              Jxz : -2120000.0
-			  
-      delta_a_max : 25
-      delta_r_max : 15
-                                                                     
+#                       LS         HS
+#                  ----------- -----------
+                m :   288773.0,   288773.0
+
+               Ix : 19388197.0, 24700000.0
+               Iy : 45013156.0, 44900000.0
+               Iz : 61418554.0, 67300000.0
+              Jxz : -3023474.0, -2120000.0
+
 ######################################################################
 #                             PROPULSION                             #
 #                                                                    #
 #   Note: engine positions are numbered from left to right from      #
 #   the point of view of the pilot looking forward                   #
-#               T : Engine thrust (N)                                #
+#           n_eng : Number of engines                                #
 #         epsilon : Engine angle of attack (deg)                     #
 #              ni : Engine sideslip angle (deg)                      #
 #           eng_x : X distance to the CG (m)                         #
 #           eng_y : Y distance to the CG (m)                         #
 #           eng_z : Z distance to the CG (m)                         #
-      
-                T :  44550.0,  44550.0,  44550.0,  44550.0
+#                                                                    #
+#            TOGA : Engine Take-Off/Go-Around thrust (N)             #
+#              Tn : Engine thrust in the n condition (N)             #
+
+            n_eng : 4
           epsilon :      0.0,      0.0,      0.0,      0.0
                ni :      0.0,      0.0,      0.0,      0.0
             eng_x :     -6.3,      2.1,      2.1,     -6.3
             eng_y :    -21.3,    -12.1,     12.1,     21.3
             eng_z :    2.331,    2.941,    2.941,    2.331
 
+             TOGA : 243500.0, 243500.0, 243500.0, 243500.0
+               T1 :  57763.8,  57763.8,  57763.8,  57763.8
+               T2 :  44550.0,  44550.0,  44550.0,  44550.0
+
 ######################################################################
 #                           LANDING GEAR                             #
 #                                                                    #
-#   Note: Landing gear positions are numbered from from to back      #
+#   Note: Landing gear positions are numbered from front to back      #
 #   and from left to right from the point of view of the pilot       #
 #   looking forward                                                  #
 #            lg_x : X distance to the CG (m)                         #
@@ -75,82 +102,92 @@
 #            lg_z : Z distance to the CG (m)                         #
 #                                                                    #
 #           mu_gr : Rolling friction coefficient (-)                 #
-      
+
              lg_x : 14.25, -11.35, -11.35
              lg_y :  0.00,  -5.50,   5.50
              lg_z :  4.89,   4.89,   4.89 
 
-			mu_gr : 0.025 
-			
+            mu_gr : 0.025 
+
 ######################################################################
 #                            AERODYNAMICS                            #
 #                                                                    #
 #          CL_max : Maximum lift coefficient                         #
 #                                                                    #
 #                      Longitudinal derivatives                      #
-#                  Cx             Cz             Cm                  #
-#            ----------------------------------------------          #
-#          0 |   -              Cz_0           Cm_0                  #
-#          u |   Cx_u           Cz_u           Cm_u                  #
-#      alpha |   Cx_alpha       Cz_alpha       Cm_alpha              #
-#          q |   Cx_q           Cz_q           Cm_q                  #
-#  alpha_dot |   Cx_alpha_dot   Cz_alpha_dot   Cm_alpha_dot          #
-#            |                                                       #
-#    delta_e |   Cx_delta_e     Cz_delta_e     Cm_delta_e            #
+#                   Cx             Cz             Cm                 #
+#             ----------------------------------------------         #
+#           0 |   -              Cz_0           Cm_0                 #
+#           u |   Cx_u           Cz_u           Cm_u                 #
+#       alpha |   Cx_alpha       Cz_alpha       Cm_alpha             #
+#           q |   Cx_q           Cz_q           Cm_q                 #
+#   alpha_dot |   Cx_alpha_dot   Cz_alpha_dot   Cm_alpha_dot         #
+#             |                                                      #
+#     delta_e |   Cx_delta_e     Cz_delta_e     Cm_delta_e           #
+# delta_e_dot |   -              -              Cm_delta_e_dot       #
 #                                                                    #
-#                  Lateral-directional derivatives                   #
-#                  Cy             Cl             Cn                  #
-#            ----------------------------------------------          #
-#       beta |   Cy_beta        Cl_beta        Cn_beta               #
-#          p |   Cy_p           Cl_p           Cn_p                  #
-#          r |   Cy_r           Cl_r           Cn_r                  #
-#            |                                                       #
-#    delta_a |   Cy_delta_a     Cl_delta_a     Cn_delta_a            #
-#    delta_r |   Cy_delta_r     Cl_delta_r     Cn_delta_r            #
-#                                                                    #
+#                   Lateral-directional derivatives                  #
+#                   Cy             Cl             Cn                 #
+#             ----------------------------------------------         #
+#        beta |   Cy_beta        Cl_beta        Cn_beta              #
+#           p |   Cy_p           Cl_p           Cn_p                 #
+#           r |   Cy_r           Cl_r           Cn_r                 #
+#             |                                                      #
+#     delta_a |   Cy_delta_a     Cl_delta_a     Cn_delta_a           #
+#     delta_r |   Cy_delta_r     Cl_delta_r     Cn_delta_r           #
+# delta_a_dot |   -              Cl_delta_a_dot -                    #
+# delta_r_dot |   -              -              Cn_delta_r_dot       #
 
-           CL_max : 1.65
+#                      LS        HS
+#                  --------- ---------
 
-             Cz_0 : -0.298
-             Cm_0 : -0.047
+           CL_max :     1.85,     1.65
 
-             Cx_u : -0.1080
-             Cz_u : -0.1060
-             Cm_u : 0.1043
+             Cz_0 :   -0.577,   -0.298
+             Cm_0 :   -0.040,   -0.047
 
-         Cx_alpha : 0.235
-         Cz_alpha : -4.962
-         Cm_alpha : -1.033
+             Cx_u :  -0.1080,  -0.1080
+             Cz_u :  -0.1060,  -0.1060
+             Cm_u :   0.1043,   0.1043
 
-     Cx_alpha_dot : 0.0
-     Cz_alpha_dot : -5.910
-     Cm_alpha_dot : -6.410
+         Cx_alpha :    0.450,    0.235
+         Cz_alpha :   -5.802,   -4.962
+         Cm_alpha :   -1.260,   -1.033
 
-             Cx_q : 0.0
-             Cz_q : -6.000
-             Cm_q : -24.00
+     Cx_alpha_dot :      0.0,      0.0
+     Cz_alpha_dot :   -6.700,   -5.910
+     Cm_alpha_dot :   -3.200,   -6.410
 
-       Cx_delta_e : 0.0
-       Cz_delta_e : -0.367 
-       Cm_delta_e : -1.450
+             Cx_q :      0.0,      0.0
+             Cz_q :   -5.400,   -6.000
+             Cm_q :   -20.80,   -24.00
+
+       Cx_delta_e :      0.0,      0.0
+       Cz_delta_e :   -0.338,   -0.367
+       Cm_delta_e :   -1.340,   -1.450
+
+   Cm_delta_e_dot :      0.0,      0.0
 
 
-          Cy_beta : -0.88
-          Cl_beta : -0.277
-          Cn_beta : 0.195
+          Cy_beta :    -0.96,    -0.88
+          Cl_beta :   -0.221,   -0.277
+          Cn_beta :     0.15,    0.195
 
-             Cy_p : 0.0
-             Cl_p : -0.334
-             Cn_p : -0.0415
+             Cy_p :      0.0,      0.0
+             Cl_p :    -0.45,   -0.334
+             Cn_p :   -0.121,  -0.0415
 
-             Cy_r : 0.0
-             Cl_r : 0.3
-             Cn_r : -0.327
+             Cy_r :      0.0,      0.0
+             Cl_r :    0.101,      0.3
+             Cn_r :     -0.3,   -0.327
 
-       Cy_delta_a : 0.0
-       Cl_delta_a : 0.0137
-       Cn_delta_a : 0.0002
+       Cy_delta_a :      0.0,      0.0
+       Cl_delta_a :   0.0461,   0.0137
+       Cn_delta_a :   0.0064,   0.0002
 
-       Cy_delta_r : -0.11465
-       Cl_delta_r : -0.007
-       Cn_delta_r : 0.1256
+       Cy_delta_r :   -0.175, -0.11465
+       Cl_delta_r :   -0.007,   -0.007
+       Cn_delta_r :    0.109,   0.1256
+
+   Cl_delta_a_dot :      0.0,      0.0
+   Cn_delta_r_dot :      0.0,      0.0

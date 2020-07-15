@@ -3,6 +3,9 @@
 #                                                                    #
 #              aircraft : Path to the ADF                            #
 #                                                                    #
+#             condition : Select the number of one of the conditions #
+#                         presented in the ADF                       #
+#                                                                    #
 #                  type : Type of analysis                           #
 #                         0 : Complete analysis                      #
 #                         1 : Static - Longitudinal                  #
@@ -27,9 +30,11 @@
 #                         Define to get trim in a stationary turn    #
 #                                                                    #
 
-               aircraft : B747_HS.dat
+               aircraft : B747.dat
 
-                   type : 0
+              condition : 1
+
+                   type : 5
 
                  T_rate : 1.0, 1.0, 1.0, 1.0
 

@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from sympy import symbols, Poly
 from scipy import signal
 from scipy.optimize import fsolve
+from scipy.interpolate import interp1d
 
 
 def read_input_file(file):
@@ -19,7 +20,7 @@ def read_input_file(file):
         
     Outputs:
         input_data: Dictionary with the input file variables
-        adf_data: Dictionary with the aircraft data
+        adf_data: Dictionary with the aircraft data for the selected condition
     
     """
     with open(file,'r') as f:
@@ -32,41 +33,55 @@ def read_input_file(file):
     for index, title in enumerate(variable_name):    
         if title == 'aircraft':
             input_data[title] = variable_data[index][0]
-        elif title == 'type':
+        elif title in ['condition', 'type']:
             input_data[title] = np.array([int(var) for var in variable_data[index]])[0]
         else:
             input_data[title] = np.array([float(var) for var in variable_data[index]])
                 
-    adf_data = read_adf_file(input_data['aircraft'])
+    adf_data = read_adf_file(input_data['aircraft'], input_data['condition'])
     
     return input_data, adf_data
 
-def read_adf_file(file):
+def read_adf_file(file, condition):
     """ 
     This function reads the adf file into a dict
     
     Inputs:
         file: Path to the adf file
+        condition: selected aircrafr condition
         
     Outputs:
-        adf_data: Dictionary with the aircraft data
+        adf_data: Dictionary with the aircraft data for the selected condition
     
-    """          
+    """ 
+    ind = condition - 1
+
     with open(file,'r') as f:
         lines = [line.strip().split(':') for line in f.readlines() if (line.strip() and not line.startswith("#"))]
         
     variable_name = [line[0].strip() for line in lines]
     variable_data = [[float(var) for var in line[1].replace(" ","").split(',')] for line in lines]
 
-    adf_data = {}      
+    adf_data = {}
+    common_single = ['n_conditions','TOW_min', 'TOW_max', 'LW_min', 'LW_max', 'dW', 'delta_a_max', 'delta_r_max',
+                    'S', 'c', 'b', 'n_eng', 'mu_gr', ]
+    common_array  = ['TOGA', 'epsilon', 'ni', 'eng_x', 'eng_y', 'eng_z', 'lg_x', 'lg_y', 'lg_z']
+    T_array       = ['T' + str(i) for i in range(10)]
+    T_condition   = 'T' + str(condition)
     for index, title in enumerate(variable_name):
-        if (title == 'T' or title == 'epsilon' or title == 'ni' or 
-            title == 'eng_x' or title == 'eng_y' or title == 'eng_z' or
-            title == 'lg_x' or title == 'lg_y' or title == 'lg_z'):
-            adf_data[title] = np.array(variable_data[index])
-        else:
+        if title in common_single:
             adf_data[title] = np.array(variable_data[index])[0]
+        elif title in common_array:
+            adf_data[title] = np.array(variable_data[index])
+        elif title in T_array:
+            if title == T_condition:
+                adf_data['T'] = np.array(variable_data[index]) 
+        else:
+            adf_data[title] = np.array(variable_data[index])[ind]
     
+    adf_data['n_conditions'] = int(adf_data['n_conditions'])
+    adf_data['n_eng']        = int(adf_data['n_eng'])
+
     # Get speed in Mach and KTAS
     a = get_speed_of_sound(feet_to_meters * adf_data['altitude'])
     if adf_data['speed'] < 5.0 :
@@ -80,11 +95,6 @@ def read_adf_file(file):
     rho = get_density(feet_to_meters * adf_data['altitude'])
     p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
     adf_data['Cz_s'] = -(adf_data['m'] * g) / (p_d * adf_data['S'])
-    
-    # Temporary 
-    adf_data['Cm_delta_e_dot'] = 0.0 
-    adf_data['Cl_delta_a_dot'] = 0.0 
-    adf_data['Cn_delta_r_dot'] = 0.0 
     
     return adf_data
 
@@ -171,21 +181,41 @@ def get_dynamic_pressure(rho,speed):
     
     return p_d
 
-def get_stall_speed(adf_data):
+def get_stall_speed(m, rho, S, CL_max):
     """
     This function calculates the reference stall speed (Vsr)
     
     Inputs:
-        adf_data: dictionary with the aircraft data
+        m: weight (kg)
+        rho: air density (kg/m3)
+        S: wing surface (m2)
+        CL_max: Maximum lift coefficient (-)
         
     Outputs:
         Vsr: reference stall speed (m/s)
 
     """
-    rho = get_density(feet_to_meters*adf_data['altitude'])
-    Vsr = ((adf_data['m']*g)/(0.5*rho*adf_data['S']*adf_data['CL_max']))**0.5
+    Vsr = ((m*g)/(0.5*rho*S*CL_max))**0.5
 
     return Vsr
+
+def get_critical_engine(adf_data):
+    """
+    This function calculates the most critical engine in case of failure
+    
+    Inputs:
+        adf_data: dictionary with the aircraft data
+        
+    Outputs:
+        critical_eng: most critical engine
+
+    """
+    Nt = [adf_data['TOGA'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
+          math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in range(adf_data['n_eng'])]
+    
+    critical_eng = Nt.index(min(Nt)) # Failure in the right side
+
+    return critical_eng
 
 def calculate_static_long(adf_data, input_data):
     """
@@ -207,14 +237,10 @@ def calculate_static_long(adf_data, input_data):
     
     """
     # Propulsion
-    
-    n_engines = len(adf_data['T'])
-    
-    Ft_z = sum(-adf_data['T'][i] * math.sin(np.radians(adf_data['epsilon'][i]))  for i in range(n_engines))
+    Ft_z = sum(-adf_data['T'][i] * math.sin(np.radians(adf_data['epsilon'][i]))  for i in range(adf_data['n_eng']))
 
-    
     Mt_y = sum(adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
-               math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_x'][i]) for i in range(n_engines))
+               math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_x'][i]) for i in range(adf_data['n_eng']))
     """
     
     # TRIM
@@ -269,16 +295,14 @@ def calculate_static_latdir(adf_data, input_data):
     rho = get_density(feet_to_meters * adf_data['altitude'])
     p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
     
-    # Propulsion
-    n_engines = len(adf_data['T'])
-    
-    Ft_y = sum(input_data['T_rate'][i] * adf_data['T'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in range(n_engines))
+    # Propulsion   
+    Ft_y = sum(input_data['T_rate'][i] * adf_data['T'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in range(adf_data['n_eng']))
     
     Lt   = sum(-input_data['T_rate'][i] * adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
-             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in range(n_engines))
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in range(adf_data['n_eng']))
     
     Nt   = sum(input_data['T_rate'][i] * adf_data['T'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
-             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in range(n_engines))
+             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in range(adf_data['n_eng']))
     
     # TRIM 
     phi_b     = np.array([])
@@ -686,28 +710,29 @@ def calculate_vmcg(adf_data):
         adf_data: dictionary with the aircraft data
         
     Outputs:
-        V: VMC (kt)
+        V: VMCG (kt)
 
     """
-    delta_r = -np.radians(adf_data['delta_r_max']) # Right engine out
+    delta_r = -np.radians(adf_data['delta_r_max']) # engine out iy el delta_a n the right side
     rho     = get_density(feet_to_meters*adf_data['altitude'])
     n_lg    = len(adf_data['lg_x'])
-    Vsr     = get_stall_speed(adf_data)
+    Vsr     = get_stall_speed(adf_data['m'], rho, adf_data['S'], adf_data['CL_max'])
 
     # Propulsion
-    n_engines = len(adf_data['T']) - 1 # Right engine out
+    critical_eng = get_critical_engine(adf_data)
+    operative_eng = [eng for eng in range(adf_data['n_eng']) if eng != critical_eng]
     
-    Ft_y = sum(adf_data['T'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in range(n_engines))
-    Ft_z = sum(-adf_data['T'][i] * math.sin(np.radians(adf_data['epsilon'][i]))  for i in range(n_engines))
+    Ft_y = sum(adf_data['TOGA'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in operative_eng)
+    Ft_z = sum(-adf_data['TOGA'][i] * math.sin(np.radians(adf_data['epsilon'][i]))  for i in operative_eng)
 
-    Lt = sum(adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
-             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in range(n_engines))
-    Mt = sum(adf_data['T'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
-             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_x'][i]) for i in range(n_engines))
-    Nt = sum(adf_data['T'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
-             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in range(n_engines))
+    Lt = sum(adf_data['TOGA'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in operative_eng)
+    Mt = sum(adf_data['TOGA'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_x'][i]) for i in operative_eng)
+    Nt = sum(adf_data['TOGA'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
+             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in operative_eng)
     
-    # First aproximation
+    # First aproximation (without LG effect)
     def equations_aprox(var):
         V, beta = var
 
@@ -716,7 +741,7 @@ def calculate_vmcg(adf_data):
 
         return [eq2, eq6]
 
-    ini_aprox = [0.8*Vsr, 0.]
+    ini_aprox = [Vsr, 0.]
     V_ini, beta_ini = fsolve(equations_aprox, ini_aprox)
 
     # Final system (with LG effect)
@@ -725,7 +750,7 @@ def calculate_vmcg(adf_data):
         x = var
 
         eq2 = Ft_y + 0.5*rho*x[0]**2*adf_data['S']*(adf_data['Cy_beta']*x[1] + adf_data['Cy_delta_r']*delta_r) + x[2]*x[1]*sum(x[3+i] for i in range(n_lg))
-        eq3 = Ft_z + adf_data['m']*g + 0.5*rho*x[0]**2*adf_data['S']*adf_data['Cz_0'] + sum(x[3+i] for i in range(n_lg))
+        eq3 = Ft_z + adf_data['TOW_min']*g + 0.5*rho*x[0]**2*adf_data['S']*adf_data['Cz_0'] + sum(x[3+i] for i in range(n_lg))
         eq4 = Lt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cl_beta']*x[1] + adf_data['Cl_delta_r']*delta_r) + sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) - x[2]*x[1]*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
         eq5 = Mt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['c']*adf_data['Cm_0'] - sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg)) + adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
         eq6 = Nt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta']*x[1] + adf_data['Cn_delta_r']*delta_r) - adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) + x[2]*x[1]*sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg))
@@ -739,7 +764,7 @@ def calculate_vmcg(adf_data):
     ini[0]  = V_ini
     ini[1]  = beta_ini
     ini[2]  = 2369.074348*abs(beta_ini)**5 - 1268.0219021*abs(beta_ini)**4 + 24.6344543*abs(beta_ini)**3 + 3.1599044*abs(beta_ini)**2 + 5.2489678*abs(beta_ini) + 0.0086458
-    ini[3:] = [adf_data['m']*g/n_lg for i in range(n_lg)]
+    ini[3:] = [-(adf_data['TOW_min']*g+0.5*rho*V_ini**2*adf_data['S']*adf_data['Cz_0'])/n_lg for i in range(n_lg)]
     
     x = fsolve(equations, ini)
     
@@ -750,71 +775,149 @@ def calculate_vmcg(adf_data):
 
     return V
 
-def plot_out_static(out_data):
-    """ 
-    This function plot the calculated outputs
-    
-    Inputs:
-        out_data: Dictionary containing the results
-        
-    Outputs:
-        plots
-    
-    """  
+def calculate_vmca(adf_data):
+    """
+    For a right engine failure must be:
+    (phi      [deg]) Fixed Negative for right engine failure
+    (delta_r  [deg]) Negative for right engine failure
+    (delta_a  [deg]) Negative for right engine failure
+    OUTPUTS:
+    VMCA vs WEIGHT RANGE TABLE
+    VMCA FOR m WEIGHT PREDEFINED VALUE
+    """
+    # Variable definition
+    rho = get_density(0)
+    di  = 2.0
+    Cd_eng  = (0.1934*(di**2.0))/adf_data['S']
+    fixed_phi = -5.0
 
-    """
-    TO BE UPDATED
-    """
+    beta          = []
+    delta_a       = []
+    delta_r       = []
+
+    weight_vector = []
+    VMCA          = []
+    VMCA_m        = []
     
-    for alt in np.unique(out_data['altitude']): # Plot for each altitude
-        condition_alt = out_data['altitude'] == alt
-        for spd in np.unique(out_data['V']):    # Plot for each speed
-            condition_spd = out_data['V'] == spd
+    # Propulsion
+    critical_eng = get_critical_engine(adf_data)
+    operative_eng = [eng for eng in range(adf_data['n_eng']) if eng != critical_eng]
+    
+    Ft_y = sum(adf_data['TOGA'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in operative_eng)
+
+    Lt   = sum(adf_data['TOGA'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in operative_eng)
+
+    Nt   = sum(adf_data['TOGA'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
+             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in operative_eng)
+
+    # Control limit
+    delta_a_max = -np.radians(adf_data['delta_a_max'])
+    delta_r_max = -np.radians(adf_data['delta_r_max'])
+
+    # Beta, VMCA_cross and W_cross for delta_a_max and delta_r_max   (1)
+    A = np.array([[adf_data['Cl_beta'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                  [adf_data['Cn_beta'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+    b = np.array([[-adf_data['Cl_delta_r'] * delta_r_max - adf_data['Cl_delta_a'] * delta_a_max],
+                  [-adf_data['Cn_delta_r'] * delta_r_max - adf_data['Cn_delta_a'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+    X = np.linalg.solve(A,b)
+
+    betacross     = np.degrees(X[0])
+    VMCAcross     = ((X[1])**(-0.5))/kt_to_ms
+    Cy            = (adf_data['Cy_beta'] * X[0] + adf_data['Cy_delta_a'] * delta_a_max + adf_data['Cy_delta_r'] * delta_r_max)
+    Wcross        = -(Ft_y + 0.5 * rho * X[1]**(-1) * adf_data['S'] * Cy) / (g * math.sin(np.radians(fixed_phi)))
+
+    if adf_data['TOW_min'] <= Wcross <= adf_data['TOW_max']:
+        beta          = np.append(beta, betacross)
+        delta_a       = np.append(delta_a, np.degrees(delta_a_max))
+        delta_r       = np.append(delta_r, np.degrees(delta_r_max))
+        VMCA          = np.append(VMCA, VMCAcross)
+        weight_vector = np.append(weight_vector, Wcross)    
+
+    # VMCA for a given weight delta_r_max or delta_a_max
+    for W in np.arange(adf_data['TOW_min'], adf_data['TOW_max'], adf_data['dW']):
+        if W < Wcross: # delta_r_max
+            A = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_a'], (W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S'])],
+                          [adf_data['Cl_beta'], adf_data['Cl_delta_a'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta'], adf_data['Cn_delta_a'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+            b = np.array([[-adf_data['Cy_delta_r'] * delta_r_max],
+                          [-adf_data['Cl_delta_r'] * delta_r_max],
+                          [-adf_data['Cn_delta_r'] * delta_r_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+            X = np.linalg.solve(A,b)
             
-            condition = np.logical_and(condition_alt, condition_spd)
-            
-            fig, ax1 = plt.subplots()
-            
-            # Longitudinal
-            if out_data['type'] == 1: 
-                alpha   = np.extract(condition, out_data['alpha'])
-                delta_e = np.extract(condition, out_data['delta_e'])
-                                             
-                fig_name = out_data['file'][:-4] + '_alt' + str(int(alt)) + '_spd' + str(int(spd)) + '.png'
-                xl  = 'Alpha (deg)'
-                yl  = 'Elevator deflection (deg)'
-                tit = 'Altitude: ' + str(int(alt)) + ' ft\n' + 'Speed: ' + str(int(spd)) + ' kt'
-                
-                ax1.plot(alpha, delta_e)
-                
-                ax1.set(xlabel = xl, ylabel = yl, title = tit)
-                ax1.grid()
-                
-                fig.tight_layout()
-                fig.savefig(fig_name)
-                plt.show()
-                
-            # Lateral-directional
-            if out_data['type'] == 2: 
-                beta    = np.extract(condition, out_data['beta'])
-                delta_a = np.extract(condition, out_data['delta_a'])
-                delta_r = np.extract(condition, out_data['delta_r'])
-                
-                fig_name = out_data['file'][:-4] + '_alt' + str(int(alt)) + '_spd' + str(int(spd)) + '.png'
-                xl  = 'Beta (deg)'
-                yl  = 'Control deflection (deg)'
-                tit = 'Altitude: ' + str(int(alt)) + ' ft\n' + 'Speed: ' + str(int(spd)) + ' kt'
-                
-                ax1.plot(beta, delta_a, color = 'tab:blue', label = 'Aileron')
-                ax1.plot(beta, delta_r, color = 'tab:red', label = 'Rudder')
-                
-                ax1.set(xlabel = xl, ylabel = yl, title = tit)
-                ax1.grid()
-                ax1.legend(loc='best')
-                
-                fig.tight_layout()
-                fig.savefig(fig_name)
-                plt.show()
+            weight_vector = np.append(weight_vector, W)
+            beta          = np.append(beta, np.degrees(X[0]))
+            delta_a       = np.append(delta_a, np.degrees(X[1]))
+            delta_r       = np.append(delta_r, np.degrees(delta_r_max))
+            VMCA          = np.append(VMCA, ((X[2])**(-0.5))/kt_to_ms)
+
+        if W > Wcross: # delta_a_max
+            A = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_r'], ((W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S']))],
+                          [adf_data['Cl_beta'], adf_data['Cl_delta_r'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta'], adf_data['Cn_delta_r'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+            b = np.array([[-adf_data['Cy_delta_a'] * delta_a_max],
+                          [-adf_data['Cl_delta_a'] * delta_a_max],
+                          [-adf_data['Cn_delta_a'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+            X = np.linalg.solve(A,b)
+
+            weight_vector = np.append(weight_vector, W)
+            beta          = np.append(beta, np.degrees(X[0]))
+            delta_a       = np.append(delta_a, np.degrees(delta_a_max))
+            delta_r       = np.append(delta_r, np.degrees(X[1]))
+            VMCA          = np.append(VMCA, ((X[2])**(-0.5))/kt_to_ms)
+    
+    # Sort vectors by weight
+    ind           = np.argsort(weight_vector)
+    weight_vector = weight_vector[ind]
+    VMCA          = VMCA[ind]
+    beta          = beta[ind]
+    delta_a       = delta_a[ind]
+    delta_r       = delta_r[ind]
+
+    # VMCA for given initial weight (m) (4)
+    f       = interp1d(weight_vector, VMCA)
+    VMCA_m  = f(adf_data['m'])
+
+    # Calculate Vsr
+    Vsr = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max']) for W in weight_vector]
+    Vsr = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max'])/kt_to_ms for W in weight_vector]
+
+    KVsr = np.multiply(Vsr, 1.13)
+
+    # Plot Vmca and 1.13Vsr for each weight
+    height_in = 11.69
+    width_in  = 8.27
+    font_size = 15  
+
+    fig_name = out_data['file'][:-4] + '_VMCA.png'
+    xl  = 'Weight (kg)'
+    yl  = 'Speed (kt)'
+    tit = '$V_{MCA}$'
+
+    fig, ax1 = plt.subplots(figsize=(height_in, width_in))
+    ax1.plot(weight_vector, VMCA, color = 'tab:blue', label = '$V_{MCA}$')
+    ax1.plot(weight_vector, KVsr, color = 'tab:red', label = '$1.13V_{SR}$')
+
+    ax1.set_xlabel(xl, fontsize=font_size)
+    ax1.set_ylabel(yl, fontsize=font_size)
+    ax1.set_title(tit, fontsize=font_size)
+    
+    ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+    ax1.minorticks_on()
+    ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+    ax1.tick_params(labelsize=font_size)
+    ax1.legend(loc='best')
+
+    fig.tight_layout()
+    fig.savefig(fig_name)
+   
+    return weight_vector, VMCA, VMCA_m
 
 def write_output_file(out_data, input_data):
     """ 
@@ -835,12 +938,13 @@ def write_output_file(out_data, input_data):
         f.write('\n')
         
         # AIRCRAFT AND CONDITIONS
-        f.write(' Aircraft : ' + input_data['aircraft'] + '\n')
-        f.write(' Altitude : ' + '{:.1f}'.format(out_data['altitude']) + ' ft\n')
+        f.write(' Aircraft  : ' + input_data['aircraft'] + '\n')
+        f.write(' Condition : ' + '{:.0f}'.format(input_data['condition']) + '\n')
+        f.write(' Altitude  : ' + '{:.1f}'.format(out_data['altitude']) + ' ft\n')
         if out_data['speed'] < 5.0:
-            f.write('    Speed : M' + '{:.2f}'.format(out_data['speed']) + '\n')
+            f.write('     Speed : M' + '{:.2f}'.format(out_data['speed']) + '\n')
         else:
-            f.write('    Speed : ' + '{:.1f}'.format(out_data['speed']) + ' kt\n')
+            f.write('     Speed : ' + '{:.1f}'.format(out_data['speed']) + ' kt\n')
         
         f.write('\n')
         
@@ -1024,8 +1128,8 @@ def write_output_file(out_data, input_data):
             f.write('{:^80s}'.format('MINIMUM SPEEDS') + '\n')
             f.write(lines)
 
-            # Vsr
-            f.write('{:>11s}'.format('Vsr :') + '{:8.3f}'.format(out_data['Vsr']/kt_to_ms) + ' kt\n')
+            # VSR
+            f.write('{:>11s}'.format('VSR :') + '{:8.3f}'.format(out_data['Vsr']/kt_to_ms) + ' kt\n')
             f.write('\n')
 
             # VMCG
@@ -1033,6 +1137,38 @@ def write_output_file(out_data, input_data):
             f.write('\n')
             
             # VMCA
+            f.write('{:>11s}'.format('VMCA :') + '{:8.3f}'.format(out_data['VMCA_m']) + ' kt\n')
+            f.write('\n')
+
+            header   = [        'Weight', 'VMCA']
+            units    = [            'kg',   'kt']
+            variable = [ 'weight_vector', 'VMCA']
+
+            f.write('VMCA vs weight:\n')
+
+            # Header
+            string = ['{:>11s}'.format(s) for s in header]
+            string = ''.join(string) + '\n'
+            f.write(string)
+
+            # Units
+            string = ['{:>11s}'.format(s) for s in units]
+            string = ''.join(string) + '\n'
+            f.write(string)
+
+            # Line
+            string = '    ' + '-' * (11 * len(header) - 4) + '\n'
+            f.write(string)
+
+            # Variables
+            for i in range(len(out_data['weight_vector'])):
+                string = out_data[variable[0]][i]
+                string = np.append(string, [out_data[var][i] for var in variable[1:]])
+                string = ['{:>11.3f}'.format(s) for s in string]
+                string = ''.join(string) + '\n'
+                f.write(string) 
+
+            f.write('\n')
                                   
 """
 MAIN PROGRAM
@@ -1055,7 +1191,7 @@ g              = 9.80665
 #                                    INPUT                                     #
 ################################################################################
 # Define input file path
-file = './study/LS.dat'
+file = './study2/LS.dat'
 
 ################################################################################
 
@@ -1085,19 +1221,11 @@ if input_data['type'] == 3 or input_data['type'] == 0:
 if input_data['type'] == 4 or input_data['type'] == 0:
     out_data['wn_rs'], out_data['lambda_rs'], out_data['wn_spi'], out_data['lambda_spi'], out_data['wn_dr'], out_data['zeta_dr'], out_data['lambda_dr'] = calculate_dynamic_latdir(adf_data)    
 
-# Minimum control speeds
+# Minimum  speeds
 if input_data['type'] == 5 or input_data['type'] == 0: 
-    out_data['Vsr']  = get_stall_speed(adf_data) 
+    out_data['Vsr']  = get_stall_speed(adf_data['m'], get_density(adf_data['altitude']*feet_to_meters), adf_data['S'], adf_data['CL_max'])
     out_data['VMCG'] = calculate_vmcg(adf_data)
-    #out_data['VMCA'] = calculate_vmca(adf_data)
+    out_data['weight_vector'], out_data['VMCA'], out_data['VMCA_m'] = calculate_vmca(adf_data)
       
 # PRINT RESULTS   
 write_output_file(out_data, input_data)
-
-"""
-# Plot results
-if input_data['type'] == 1 or input_data['type'] == 2: # Static    
-    plot_out_static(out_data)
-else: # Dynamic
-    print('Dynamic stability and control not available for plotting')
-"""
