@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from sympy import symbols, Poly
 from scipy import signal
 from scipy.optimize import fsolve
+from scipy.interpolate import interp1d
 
 
 def read_input_file(file):
@@ -180,19 +181,21 @@ def get_dynamic_pressure(rho,speed):
     
     return p_d
 
-def get_stall_speed(adf_data):
+def get_stall_speed(m, rho, S, CL_max):
     """
     This function calculates the reference stall speed (Vsr)
     
     Inputs:
-        adf_data: dictionary with the aircraft data
+        m: weight (kg)
+        rho: air density (kg/m3)
+        S: wing surface (m2)
+        CL_max: Maximum lift coefficient (-)
         
     Outputs:
         Vsr: reference stall speed (m/s)
 
     """
-    rho = get_density(feet_to_meters*adf_data['altitude'])
-    Vsr = ((adf_data['m']*g)/(0.5*rho*adf_data['S']*adf_data['CL_max']))**0.5
+    Vsr = ((m*g)/(0.5*rho*S*CL_max))**0.5
 
     return Vsr
 
@@ -710,10 +713,10 @@ def calculate_vmcg(adf_data):
         V: VMCG (kt)
 
     """
-    delta_r = -np.radians(adf_data['delta_r_max']) # engine out un the right side
+    delta_r = -np.radians(adf_data['delta_r_max']) # engine out iy el delta_a n the right side
     rho     = get_density(feet_to_meters*adf_data['altitude'])
     n_lg    = len(adf_data['lg_x'])
-    Vsr     = get_stall_speed(adf_data)
+    Vsr     = get_stall_speed(adf_data['m'], rho, adf_data['S'], adf_data['CL_max'])
 
     # Propulsion
     critical_eng = get_critical_engine(adf_data)
@@ -776,12 +779,13 @@ def calculate_vmca(adf_data):
     """
     For a right engine failure must be:
     (phi      [deg]) Fixed Negative for right engine failure
-    (delta_r  [deg]) Positive for right engine failure
+    (delta_r  [deg]) Negative for right engine failure
     (delta_a  [deg]) Negative for right engine failure
     OUTPUTS:
     VMCA vs WEIGHT RANGE TABLE
     VMCA FOR m WEIGHT PREDEFINED VALUE
     """
+    # Variable definition
     rho = get_density(0)
     di  = 2.0
     Cd_eng  = (0.1934*(di**2.0))/adf_data['S']
@@ -790,141 +794,130 @@ def calculate_vmca(adf_data):
     beta          = []
     delta_a       = []
     delta_r       = []
-    VMCA1         = []
-    VMCA2         = []
+
+    weight_vector = []
     VMCA          = []
     VMCA_m        = []
-    weight_vector = []
-    weight_inv    = []
-
-    da = 0
-    for W in np.arange(adf_data['Wmin'], adf_data['Wmax'], adf_data['dW']):
-        A = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_a'], (W * g * math.sin(np.radians(fixed_phi))) / (0.5 * rho * adf_data['S'])],
-                      [adf_data['Cl_beta'], adf_data['Cl_delta_a'], 0.0],
-                      [adf_data['Cn_beta'], adf_data['Cn_delta_a'], (np.amax(adf_data['T']) * np.amax(adf_data['eng_y'])) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
-
-        b = np.array([[-adf_data['Cy_delta_r'] * np.radians(adf_data['delta_r_max'])],
-                      [-adf_data['Cl_delta_r'] * np.radians(adf_data['delta_r_max'])],
-                      [-adf_data['Cn_delta_r'] * np.radians(adf_data['delta_r_max']) - ((Cd_eng * np.amax(adf_data['eng_y'])) / adf_data['b'])]])
-
-        X = np.linalg.solve(A,b)
-      
-        da = X[1]
-        if abs(da)>=abs(np.radians(-adf_data['delta_a_max'])):
-            break
-        else:
-            weight_vector.append(W)
-            beta     = np.append(beta, np.degrees(X[0]))
-            delta_a  = np.append(delta_a, np.degrees(X[1]))
-            VMCA1    = np.append(VMCA1, ((X[2])**(-2))/kt_to_ms)
-  
-    # Beta, VMCA (minimum value) and Weight for delta_a_max and delta_r_max
-    beta_VMCA_min = (-adf_data['Cl_delta_a'] * np.radians(adf_data['delta_a_max']) - adf_data['Cl_delta_r'] * np.radians(adf_data['delta_r_max'])) / (adf_data['Cl_beta'])
-    Cn            = (adf_data['Cn_beta'] * beta_VMCA_min + adf_data['Cn_delta_a'] * np.radians(adf_data['delta_a_max']) + adf_data['Cn_delta_r'] * np.radians(adf_data['delta_r_max']) + ((Cd_eng * np.amax(adf_data['eng_y'])) / adf_data['b']))
-    VMCA_min      = ((-(np.amax(adf_data['T']) * np.amax(adf_data['eng_y']))) / (Cn * adf_data['S'] * adf_data['b'] * 0.5 * rho)  )**0.5
-    Cy            = (adf_data['Cy_beta'] * beta_VMCA_min + adf_data['Cy_delta_a'] * np.radians(adf_data['delta_a_max']) + adf_data['Cy_delta_r'] * np.radians(adf_data['delta_r_max']))
-    W_VMCA_min    = (0.5 * rho * (VMCA_min)**2 * adf_data['S'] * Cy) / math.sin(np.radians(fixed_phi))
-    #Weight for minimum VMCA value (delta_r_max, delta_a_max)
-    weight_vector.append(W_VMCA_min)
-
-    dr = 0
-    for W in np.arange(adf_data['Wmax'], adf_data['Wmin'], -adf_data['dW']):
-        AA = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_r'], ((W * g * math.sin(np.radians(fixed_phi))) / (0.5 * rho * adf_data['S']))],
-                      [adf_data['Cl_beta'], adf_data['Cl_delta_r'], 0.0],
-                      [adf_data['Cn_beta'], adf_data['Cn_delta_r'], [(np.amax(adf_data['T']) * np.amax(adf_data['eng_y'])) / (0.5 * rho * adf_data['S'] * adf_data['b'])]]])
-
-        bb = np.array([[-adf_data['Cy_delta_a'] * np.radians(-adf_data['delta_a_max'])],
-                      [-adf_data['Cl_delta_a'] * np.radians(-adf_data['delta_a_max'])],
-                      [-adf_data['Cn_delta_a'] * np.radians(-adf_data['delta_a_max']) - ((Cd_eng * np.amax(adf_data['eng_y'])) / adf_data['b'])]])
-
-        XX = np.linalg.solve(AA,bb)
-
-        dr = XX[1]
-        if abs(dr)>=abs(np.radians(adf_data['delta_r_max'])):
-            break
-        else:
-            weight_inv.append(W)
-            beta    = np.append(beta, np.degrees(XX[0]))
-            delta_r = np.append(delta_r, np.degrees(XX[1]))
-            VMCA2   = np.append(VMCA2, ((XX[2])**(-2))/kt_to_ms)
     
-    VMCA2.reverse()
-    VMCA = VMCA1 + VMCA_min + VMCA2
+    # Propulsion
+    critical_eng = get_critical_engine(adf_data)
+    operative_eng = [eng for eng in range(adf_data['n_eng']) if eng != critical_eng]
+    
+    Ft_y = sum(adf_data['TOGA'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in operative_eng)
 
-    weight_inv.reverse()
-    weight_vector.append(weight_inv)
+    Lt   = sum(adf_data['TOGA'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in operative_eng)
 
-    #VMCA for given initial weight (m), (delta_r_max, delta_a_max)
-    f = interp1d(weight_vector, VMCA)
-    VMCA_m   = f(adf_data['m'])
+    Nt   = sum(adf_data['TOGA'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
+             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in operative_eng)
 
+    # Control limit
+    delta_a_max = -np.radians(adf_data['delta_a_max'])
+    delta_r_max = -np.radians(adf_data['delta_r_max'])
+
+    # Beta, VMCA_cross and W_cross for delta_a_max and delta_r_max   (1)
+    A = np.array([[adf_data['Cl_beta'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                  [adf_data['Cn_beta'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+    b = np.array([[-adf_data['Cl_delta_r'] * delta_r_max - adf_data['Cl_delta_a'] * delta_a_max],
+                  [-adf_data['Cn_delta_r'] * delta_r_max - adf_data['Cn_delta_a'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+    X = np.linalg.solve(A,b)
+
+    betacross     = np.degrees(X[0])
+    VMCAcross     = ((X[1])**(-0.5))/kt_to_ms
+    Cy            = (adf_data['Cy_beta'] * X[0] + adf_data['Cy_delta_a'] * delta_a_max + adf_data['Cy_delta_r'] * delta_r_max)
+    Wcross        = -(Ft_y + 0.5 * rho * X[1]**(-1) * adf_data['S'] * Cy) / (g * math.sin(np.radians(fixed_phi)))
+
+    if adf_data['TOW_min'] <= Wcross <= adf_data['TOW_max']:
+        beta          = np.append(beta, betacross)
+        delta_a       = np.append(delta_a, np.degrees(delta_a_max))
+        delta_r       = np.append(delta_r, np.degrees(delta_r_max))
+        VMCA          = np.append(VMCA, VMCAcross)
+        weight_vector = np.append(weight_vector, Wcross)    
+
+    # VMCA for a given weight delta_r_max or delta_a_max
+    for W in np.arange(adf_data['TOW_min'], adf_data['TOW_max'], adf_data['dW']):
+        if W < Wcross: # delta_r_max
+            A = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_a'], (W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S'])],
+                          [adf_data['Cl_beta'], adf_data['Cl_delta_a'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta'], adf_data['Cn_delta_a'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+            b = np.array([[-adf_data['Cy_delta_r'] * delta_r_max],
+                          [-adf_data['Cl_delta_r'] * delta_r_max],
+                          [-adf_data['Cn_delta_r'] * delta_r_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+            X = np.linalg.solve(A,b)
+            
+            weight_vector = np.append(weight_vector, W)
+            beta          = np.append(beta, np.degrees(X[0]))
+            delta_a       = np.append(delta_a, np.degrees(X[1]))
+            delta_r       = np.append(delta_r, np.degrees(delta_r_max))
+            VMCA          = np.append(VMCA, ((X[2])**(-0.5))/kt_to_ms)
+
+        if W > Wcross: # delta_a_max
+            A = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_r'], ((W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S']))],
+                          [adf_data['Cl_beta'], adf_data['Cl_delta_r'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta'], adf_data['Cn_delta_r'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+            b = np.array([[-adf_data['Cy_delta_a'] * delta_a_max],
+                          [-adf_data['Cl_delta_a'] * delta_a_max],
+                          [-adf_data['Cn_delta_a'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+            X = np.linalg.solve(A,b)
+
+            weight_vector = np.append(weight_vector, W)
+            beta          = np.append(beta, np.degrees(X[0]))
+            delta_a       = np.append(delta_a, np.degrees(delta_a_max))
+            delta_r       = np.append(delta_r, np.degrees(X[1]))
+            VMCA          = np.append(VMCA, ((X[2])**(-0.5))/kt_to_ms)
+    
+    # Sort vectors by weight
+    ind           = np.argsort(weight_vector)
+    weight_vector = weight_vector[ind]
+    VMCA          = VMCA[ind]
+    beta          = beta[ind]
+    delta_a       = delta_a[ind]
+    delta_r       = delta_r[ind]
+
+    # VMCA for given initial weight (m) (4)
+    f       = interp1d(weight_vector, VMCA)
+    VMCA_m  = f(adf_data['m'])
+
+    # Calculate Vsr
+    Vsr = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max']) for W in weight_vector]
+    Vsr = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max'])/kt_to_ms for W in weight_vector]
+
+    KVsr = np.multiply(Vsr, 1.13)
+
+    # Plot Vmca and 1.13Vsr for each weight
+    height_in = 11.69
+    width_in  = 8.27
+    font_size = 15  
+
+    fig_name = out_data['file'][:-4] + '_VMCA.png'
+    xl  = 'Weight (kg)'
+    yl  = 'Speed (kt)'
+    tit = '$V_{MCA}$'
+
+    fig, ax1 = plt.subplots(figsize=(height_in, width_in))
+    ax1.plot(weight_vector, VMCA, color = 'tab:blue', label = '$V_{MCA}$')
+    ax1.plot(weight_vector, KVsr, color = 'tab:red', label = '$1.13V_{SR}$')
+
+    ax1.set_xlabel(xl, fontsize=font_size)
+    ax1.set_ylabel(yl, fontsize=font_size)
+    ax1.set_title(tit, fontsize=font_size)
+    
+    ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+    ax1.minorticks_on()
+    ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+    ax1.tick_params(labelsize=font_size)
+    ax1.legend(loc='best')
+
+    fig.tight_layout()
+    fig.savefig(fig_name)
+   
     return weight_vector, VMCA, VMCA_m
-
-def plot_out_static(out_data):
-    """ 
-    This function plot the calculated outputs
-    
-    Inputs:
-        out_data: Dictionary containing the results
-        
-    Outputs:
-        plots
-    
-    """  
-
-    """
-    TO BE UPDATED
-    """
-    
-    for alt in np.unique(out_data['altitude']): # Plot for each altitude
-        condition_alt = out_data['altitude'] == alt
-        for spd in np.unique(out_data['V']):    # Plot for each speed
-            condition_spd = out_data['V'] == spd
-            
-            condition = np.logical_and(condition_alt, condition_spd)
-            
-            fig, ax1 = plt.subplots()
-            
-            # Longitudinal
-            if out_data['type'] == 1: 
-                alpha   = np.extract(condition, out_data['alpha'])
-                delta_e = np.extract(condition, out_data['delta_e'])
-                                             
-                fig_name = out_data['file'][:-4] + '_alt' + str(int(alt)) + '_spd' + str(int(spd)) + '.png'
-                xl  = 'Alpha (deg)'
-                yl  = 'Elevator deflection (deg)'
-                tit = 'Altitude: ' + str(int(alt)) + ' ft\n' + 'Speed: ' + str(int(spd)) + ' kt'
-                
-                ax1.plot(alpha, delta_e)
-                
-                ax1.set(xlabel = xl, ylabel = yl, title = tit)
-                ax1.grid()
-                
-                fig.tight_layout()
-                fig.savefig(fig_name)
-                plt.show()
-                
-            # Lateral-directional
-            if out_data['type'] == 2: 
-                beta    = np.extract(condition, out_data['beta'])
-                delta_a = np.extract(condition, out_data['delta_a'])
-                delta_r = np.extract(condition, out_data['delta_r'])
-                
-                fig_name = out_data['file'][:-4] + '_alt' + str(int(alt)) + '_spd' + str(int(spd)) + '.png'
-                xl  = 'Beta (deg)'
-                yl  = 'Control deflection (deg)'
-                tit = 'Altitude: ' + str(int(alt)) + ' ft\n' + 'Speed: ' + str(int(spd)) + ' kt'
-                
-                ax1.plot(beta, delta_a, color = 'tab:blue', label = 'Aileron')
-                ax1.plot(beta, delta_r, color = 'tab:red', label = 'Rudder')
-                
-                ax1.set(xlabel = xl, ylabel = yl, title = tit)
-                ax1.grid()
-                ax1.legend(loc='best')
-                
-                fig.tight_layout()
-                fig.savefig(fig_name)
-                plt.show()
 
 def write_output_file(out_data, input_data):
     """ 
@@ -1135,8 +1128,8 @@ def write_output_file(out_data, input_data):
             f.write('{:^80s}'.format('MINIMUM SPEEDS') + '\n')
             f.write(lines)
 
-            # Vsr
-            f.write('{:>11s}'.format('Vsr :') + '{:8.3f}'.format(out_data['Vsr']/kt_to_ms) + ' kt\n')
+            # VSR
+            f.write('{:>11s}'.format('VSR :') + '{:8.3f}'.format(out_data['Vsr']/kt_to_ms) + ' kt\n')
             f.write('\n')
 
             # VMCG
@@ -1144,12 +1137,14 @@ def write_output_file(out_data, input_data):
             f.write('\n')
             
             # VMCA
-            """
-            header   = [        'weight', 'VMCA']
+            f.write('{:>11s}'.format('VMCA :') + '{:8.3f}'.format(out_data['VMCA_m']) + ' kt\n')
+            f.write('\n')
+
+            header   = [        'Weight', 'VMCA']
             units    = [            'kg',   'kt']
             variable = [ 'weight_vector', 'VMCA']
 
-            f.write('VMCA vs weight variation:\n')
+            f.write('VMCA vs weight:\n')
 
             # Header
             string = ['{:>11s}'.format(s) for s in header]
@@ -1166,17 +1161,14 @@ def write_output_file(out_data, input_data):
             f.write(string)
 
             # Variables
-            for i in range(len(input_data['weight_vector'])):
-                string = input_data[variable[0]][i]
+            for i in range(len(out_data['weight_vector'])):
+                string = out_data[variable[0]][i]
                 string = np.append(string, [out_data[var][i] for var in variable[1:]])
                 string = ['{:>11.3f}'.format(s) for s in string]
                 string = ''.join(string) + '\n'
                 f.write(string) 
 
-            f.write('VMCA for ' + out_data['m'] + 'weight:')
-            f.write('{:>11s}'.format('VMCA_m :') + '{:8,3f}'.format(out_data['VMCA_m']) + ' kt\n')
             f.write('\n')
-            """
                                   
 """
 MAIN PROGRAM
@@ -1231,17 +1223,9 @@ if input_data['type'] == 4 or input_data['type'] == 0:
 
 # Minimum  speeds
 if input_data['type'] == 5 or input_data['type'] == 0: 
-    out_data['Vsr']  = get_stall_speed(adf_data) 
+    out_data['Vsr']  = get_stall_speed(adf_data['m'], get_density(adf_data['altitude']*feet_to_meters), adf_data['S'], adf_data['CL_max'])
     out_data['VMCG'] = calculate_vmcg(adf_data)
-    #out_data['weight_vector'], out_data['VMCA'], out_data['VMCA_m'] = calculate_vmca(adf_data)
+    out_data['weight_vector'], out_data['VMCA'], out_data['VMCA_m'] = calculate_vmca(adf_data)
       
 # PRINT RESULTS   
 write_output_file(out_data, input_data)
-
-"""
-# Plot results
-if input_data['type'] == 1 or input_data['type'] == 2: # Static    
-    plot_out_static(out_data)
-else: # Dynamic
-    print('Dynamic stability and control not available for plotting')
-"""
