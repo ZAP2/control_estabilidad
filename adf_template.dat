@@ -5,14 +5,39 @@
 ######################################################################
 
 ######################################################################
+#                        AIRCRAFT DESCRIPTION                        #
+#                                                                    #
+#              AA : Fuselage code                                    #
+#              BB : Wing code                                        #
+#              CC : Tail code                                        #
+#             DDD : Propulsion code                                  #
+#              EE : Air inlet code                                   #
+#              FF : Canard code                                      # 
+#               R : Comment for revised configuration (optional)     #
+
+               AA : 00
+               BB : 00
+               CC : 00
+              DDD : 000
+               EE : 00
+               FF : 00
+
+
+######################################################################
 #                        REFERENCE CONDITIONS                        #
 #                                                                    #
 #    n_conditions : number of conditions defined in the ADF          #
+#    TO_condition : Position of the defined take-off condition       #
+#                   (0 if there is no take-off condition)            #
+#    LD_condition : Position of the defined landing condition        #
+#                   (0 if there is no landing condition)             #
 #                                                                    #
 #        altitude : Flight altitude (ft)                             #
 #           speed : Speed (Mach / KTAS)                              #
 
      n_conditions : 2
+     TO_condition : 1
+     LD_condition : 0
 
 #                     LS       HS
 #                  -------- --------
