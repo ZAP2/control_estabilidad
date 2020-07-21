@@ -14,6 +14,10 @@
 #                         4 : Dynamic - Lateral-Directional          #
 #                         5 : Minimum Speeds                         #
 #                                                                    #
+#                  plot : Plot option (optional)                     #
+#                         0 : Plot disabled                          #
+#                         1 : Plot enabled (default)                 #
+#                                                                    #
 #                T_rate : Thrust rate control for each engine.       #
 #                         When modifying the unitary engine thrusts  #
 #                         the total thrust shall be constant         #
@@ -30,11 +34,13 @@
 #                         Define to get trim in a stationary turn    #
 #                                                                    #
 
-               aircraft : B747.dat
+               aircraft : adf_template.dat
 
-              condition : 1
+              condition : 2
 
-                   type : 5
+                   type : 0
+
+                   plot : 1
 
                  T_rate : 1.0, 1.0, 1.0, 1.0
 

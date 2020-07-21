@@ -33,53 +33,76 @@ def read_input_file(file):
     for index, title in enumerate(variable_name):    
         if title == 'aircraft':
             input_data[title] = variable_data[index][0]
-        elif title in ['condition', 'type']:
+        elif title in ['condition', 'type', 'plot']:
             input_data[title] = np.array([int(var) for var in variable_data[index]])[0]
         else:
             input_data[title] = np.array([float(var) for var in variable_data[index]])
-                
+
+    if 'plot' not in input_data:
+        input_data['plot'] = 1
+
+    # Read adf data            
     adf_data = read_adf_file(input_data['aircraft'], input_data['condition'])
     
-    return input_data, adf_data
+    # Read aircraft config
+    aircraft_config = read_aircraft_config(adf_data)
+    
+    return input_data, adf_data, aircraft_config
 
 def read_adf_file(file, condition):
     """ 
     This function reads the adf file into a dict
     
     Inputs:
-        file: Path to the adf file
-        condition: selected aircrafr condition
+        file: Path to the adf 
+        condition: selected aircraft condition
         
     Outputs:
         adf_data: Dictionary with the aircraft data for the selected condition
     
-    """ 
+    """
+
     ind = condition - 1
 
     with open(file,'r') as f:
         lines = [line.strip().split(':') for line in f.readlines() if (line.strip() and not line.startswith("#"))]
         
     variable_name = [line[0].strip() for line in lines]
-    variable_data = [[float(var) for var in line[1].replace(" ","").split(',')] for line in lines]
+    variable_data = [line[1].replace(" ","").split(',') for line in lines]
 
     adf_data = {}
-    common_single = ['n_conditions','TOW_min', 'TOW_max', 'LW_min', 'LW_max', 'dW', 'delta_a_max', 'delta_r_max',
-                    'S', 'c', 'b', 'n_eng', 'mu_gr', ]
+    common_str    = ['AA', 'BB', 'CC', 'DDD', 'EE', 'FF', 'R']
+    common_single = ['n_conditions','TO_condition', 'LD_condition',
+                     'TOW_min', 'TOW_max', 'LW_min', 'LW_max', 'dW', 'delta_a_max', 'delta_r_max',
+                     'S', 'c', 'b', 'n_eng', 'mu_gr']
     common_array  = ['TOGA', 'epsilon', 'ni', 'eng_x', 'eng_y', 'eng_z', 'lg_x', 'lg_y', 'lg_z']
-    T_array       = ['T' + str(i) for i in range(10)]
+    cond_filter   = ['altitude', 'speed', 'm', 'Ix', 'Iy', 'Iz', 'Jxz']                 
+    T_array       = ['T' + str(i) for i in range(20)]
     T_condition   = 'T' + str(condition)
     for index, title in enumerate(variable_name):
-        if title in common_single:
-            adf_data[title] = np.array(variable_data[index])[0]
-        elif title in common_array:
-            adf_data[title] = np.array(variable_data[index])
-        elif title in T_array:
+        if title in common_str: # Common data in str format
+            adf_data[title] = variable_data[index][0]
+        elif title in common_single: # Common data as single value
+            adf_data[title] = np.asarray(variable_data[index], dtype=np.float64, order='C')[0]
+        elif title in common_array: # Common data in an array
+            adf_data[title] = np.asarray(variable_data[index], dtype=np.float64, order='C')
+        elif title in cond_filter: # Select data for the desired condition
+            adf_data[title] = np.asarray(variable_data[index], dtype=np.float64, order='C')[ind]
+        elif title in T_array: # Select thrust por the desired condition
             if title == T_condition:
-                adf_data['T'] = np.array(variable_data[index]) 
-        else:
-            adf_data[title] = np.array(variable_data[index])[ind]
+                adf_data['T'] = np.asarray(variable_data[index], dtype=np.float64, order='C')
+        else: # Get coeffs for desired condition, TO and LD (if exist)
+            adf_data[title] = np.asarray(variable_data[index], dtype=np.float64, order='C')[ind]
+            if adf_data['TO_condition'] != 0:
+                ind_TO = int(adf_data['TO_condition'] - 1)
+                adf_data[title + '_TO'] = np.asarray(variable_data[index], dtype=np.float64, order='C')[ind_TO]
+            if adf_data['LD_condition'] != 0:
+                ind_LD = int(adf_data['LD_condition'] - 1)
+                adf_data[title + '_LD'] = np.asarray(variable_data[index], dtype=np.float64, order='C')[ind_LD]
     
     adf_data['n_conditions'] = int(adf_data['n_conditions'])
+    adf_data['TO_condition'] = int(adf_data['TO_condition'])
+    adf_data['LD_condition'] = int(adf_data['LD_condition'])
     adf_data['n_eng']        = int(adf_data['n_eng'])
 
     # Get speed in Mach and KTAS
@@ -97,6 +120,57 @@ def read_adf_file(file, condition):
     adf_data['Cz_s'] = -(adf_data['m'] * g) / (p_d * adf_data['S'])
     
     return adf_data
+
+def read_aircraft_config(adf_data):
+    """ 
+    This function reads the adf file into a dict
+    
+    Inputs:
+        adf_data: dictionary with the adf data
+    Outputs:
+        aircraft_config: Description related with the aircraft code
+    
+    """
+    aircraft_config = {}
+
+    component = ['Fuselage', 'Wing', 'Tail', 'Prop_dist', 'Prop_tip', 'Prop_tail','Air_inlet', 'Canard']
+    option = [['Streamlined', 'Conventional'],                 # Fuselage
+              ['Low', 'High'],                                 # Wing
+              ['T', 'V', 'U', 'Conventional'],                 # Tail
+              ['Lower', 'Upper', 'Zigzag', 'Embedded', 'No'],  # Prop_dist
+              ['Puller', 'Pusher', 'No'],                      # Prop_tip
+              ['BLI', 'No'],                                   # Prop_tail
+              ['Upper', 'Lower', 'Lateral', 'No'],             # Air_inlet
+              ['Yes', 'No']]                                   # Canard
+    code   = [['01', '00'],                # Fuselage
+              ['01', '00'],                # Wing
+              ['01', '02', '03', '00'],    # Tail
+              ['1', '2', '3', '4', '0'],   # Prop_dist
+              ['1', '2', '0'],             # Prop_tip
+              ['1', '0'],                  # Prop_tail
+              ['01', '02', '03', '00'],    # Air_inlet
+              ['01', '00']]                # Canard
+
+    letter = ['AA', 'BB', 'CC', 'DDD', 'EE', 'FF']
+    
+    i = 0
+    for let in letter:
+        ac_code = adf_data[let]
+        if let == 'DDD': # Prop
+            ac_code = list(ac_code)
+            for c in ac_code:
+                code_ind  =  code[i].index(c)
+                aircraft_config[component[i]] = option[i][code_ind]
+                i += 1
+        else:
+            code_ind  =  code[i].index(ac_code)
+            aircraft_config[component[i]] = option[i][code_ind]
+            i += 1
+
+    if 'R' in adf_data:
+        aircraft_config['Revision'] = adf_data['R']
+    
+    return aircraft_config
 
 def get_temperature (altitude):
     """
@@ -355,12 +429,13 @@ def calculate_static_latdir(adf_data, input_data):
         
     return phi_b, delta_a_b, delta_r_b, beta_p, delta_a_p, delta_r_p, n_p
 
-def calculate_dynamic_long(adf_data):
+def calculate_dynamic_long(adf_data, input_data):
     """
     This function calculates the dynamic longitudinal stability
     
     Inputs:
         adf_data: dictionary with the aircraft data
+        input_data: dictionary with the input data
 
     Outputs:
         wn_ph, zeta_ph, lambda_ph: results for phugoide mode
@@ -410,99 +485,101 @@ def calculate_dynamic_long(adf_data):
     """ 
     CONTROL
     
-    """  
-    # Num
-    Adj = []
-    ind = np.arange(3)
-    for i in range(3):
-        for j in range(3):
-            if (i+1 + j+1) % 2 == 0:
-                sign = 1
-            else:
-                sign = -1
-                
-            aux = As[ind != i]
-            aux = aux[:, ind != j]
-            pol = Poly(sign*(aux[0,0] * aux[1,1] - aux[0,1] * aux[1,0]), s)
-            
-            Adj.append(pol)
-            
-    Adj = np.reshape(Adj,[3,3])
-    
-    N_u_delta_e     = adf_data['Cx_delta_e'] * Adj[0,0] + adf_data['Cz_delta_e'] * Adj[1,0] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,0]
-    N_alpha_delta_e = adf_data['Cx_delta_e'] * Adj[0,1] + adf_data['Cz_delta_e'] * Adj[1,1] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,1]
-    N_theta_delta_e = adf_data['Cx_delta_e'] * Adj[0,2] + adf_data['Cz_delta_e'] * Adj[1,2] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,2]
-    
-    N_u_delta_e     = [float(N_u_delta_e.all_coeffs()[k]) for k in range(len(N_u_delta_e.all_coeffs()))]
-    N_alpha_delta_e = [float(N_alpha_delta_e.all_coeffs()[k]) for k in range(len(N_alpha_delta_e.all_coeffs()))]
-    N_theta_delta_e = [float(N_theta_delta_e.all_coeffs()[k]) for k in range(len(N_theta_delta_e.all_coeffs()))]
-    
-    # Den
-    Ds = [A, B, C, D, E]
-    
-    # Transfer function
-    G_u_delta_e     = (N_u_delta_e, Ds)
-    G_alpha_delta_e = (N_alpha_delta_e, Ds)
-    G_theta_delta_e = (N_theta_delta_e, Ds)
-    
-    #CHARTS
-    n_points = 500
-    height_in = 11.69
-    width_in  = 8.27
-    font_size = 15
-        
-    tf = [ G_u_delta_e,    G_alpha_delta_e,    G_theta_delta_e]
-    yl = ['$\\Delta$û', '$\\Delta\\alpha$', '$\\Delta\\theta$']
-    xl = '$\\^t$'
+    """ 
+    if input_data['plot'] == 1: 
+        # Num
+        Adj = []
+        ind = np.arange(3)
+        for i in range(3):
+            for j in range(3):
+                if (i+1 + j+1) % 2 == 0:
+                    sign = 1
+                else:
+                    sign = -1
                     
-    # Response to impulse
-    tit = 'Response to impulse\n $\\delta$e'
-    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_u' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_alpha' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_theta' + '.png']
-    for i in range(len(tf)):
-        t, y = signal.impulse(tf[i], N=n_points)
-        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
-        ax1.plot(t, y) 
-        ax1.set_xlabel(xl, fontsize=font_size)
-        ax1.set_ylabel(yl[i], fontsize=font_size)
-        ax1.set_title(tit, fontsize=font_size)
-        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
-        ax1.minorticks_on()
-        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
-        ax1.tick_params(labelsize=font_size)
-        fig.tight_layout()
-        fig.savefig(fig_name[i])
-        #plt.show()
+                aux = As[ind != i]
+                aux = aux[:, ind != j]
+                pol = Poly(sign*(aux[0,0] * aux[1,1] - aux[0,1] * aux[1,0]), s)
+                
+                Adj.append(pol)
+                
+        Adj = np.reshape(Adj,[3,3])
         
-    # Response to step
-    tit = 'Response to step\n $\\delta$e'
-    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_e_step_u' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_e_step_alpha' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_e_step_theta' + '.png']
-    for i in range(len(tf)):
-        t, y = signal.step(tf[i], N=n_points)
-        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
-        ax1.plot(t, y) 
-        ax1.set_xlabel(xl, fontsize=font_size)
-        ax1.set_ylabel(yl[i], fontsize=font_size)
-        ax1.set_title(tit, fontsize=font_size)
-        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
-        ax1.minorticks_on()
-        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
-        ax1.tick_params(labelsize=font_size)
-        fig.tight_layout()
-        fig.savefig(fig_name[i])
-        #plt.show()
+        N_u_delta_e     = adf_data['Cx_delta_e'] * Adj[0,0] + adf_data['Cz_delta_e'] * Adj[1,0] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,0]
+        N_alpha_delta_e = adf_data['Cx_delta_e'] * Adj[0,1] + adf_data['Cz_delta_e'] * Adj[1,1] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,1]
+        N_theta_delta_e = adf_data['Cx_delta_e'] * Adj[0,2] + adf_data['Cz_delta_e'] * Adj[1,2] + (adf_data['Cm_delta_e_dot']*s + adf_data['Cm_delta_e']) * Adj[2,2]
+        
+        N_u_delta_e     = [float(N_u_delta_e.all_coeffs()[k]) for k in range(len(N_u_delta_e.all_coeffs()))]
+        N_alpha_delta_e = [float(N_alpha_delta_e.all_coeffs()[k]) for k in range(len(N_alpha_delta_e.all_coeffs()))]
+        N_theta_delta_e = [float(N_theta_delta_e.all_coeffs()[k]) for k in range(len(N_theta_delta_e.all_coeffs()))]
+        
+        # Den
+        Ds = [A, B, C, D, E]
+        
+        # Transfer function
+        G_u_delta_e     = (N_u_delta_e, Ds)
+        G_alpha_delta_e = (N_alpha_delta_e, Ds)
+        G_theta_delta_e = (N_theta_delta_e, Ds)
+        
+        #CHARTS
+        n_points = 500
+        height_in = 11.69
+        width_in  = 8.27
+        font_size = 15
+            
+        tf = [ G_u_delta_e,    G_alpha_delta_e,    G_theta_delta_e]
+        yl = ['$\\Delta$û', '$\\Delta\\alpha$', '$\\Delta\\theta$']
+        xl = '$\\^t$'
+                        
+        # Response to impulse
+        tit = 'Response to impulse\n $\\delta$e'
+        fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_u' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_alpha' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_e_impulse_theta' + '.png']
+        for i in range(len(tf)):
+            t, y = signal.impulse(tf[i], N=n_points)
+            fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+            ax1.plot(t, y) 
+            ax1.set_xlabel(xl, fontsize=font_size)
+            ax1.set_ylabel(yl[i], fontsize=font_size)
+            ax1.set_title(tit, fontsize=font_size)
+            ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+            ax1.minorticks_on()
+            ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+            ax1.tick_params(labelsize=font_size)
+            fig.tight_layout()
+            fig.savefig(fig_name[i])
+            #plt.show()
+            
+        # Response to step
+        tit = 'Response to step\n $\\delta$e'
+        fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_e_step_u' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_e_step_alpha' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_e_step_theta' + '.png']
+        for i in range(len(tf)):
+            t, y = signal.step(tf[i], N=n_points)
+            fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+            ax1.plot(t, y) 
+            ax1.set_xlabel(xl, fontsize=font_size)
+            ax1.set_ylabel(yl[i], fontsize=font_size)
+            ax1.set_title(tit, fontsize=font_size)
+            ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+            ax1.minorticks_on()
+            ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+            ax1.tick_params(labelsize=font_size)
+            fig.tight_layout()
+            fig.savefig(fig_name[i])
+            #plt.show()
     
     return wn_ph, zeta_ph, lambda_ph, wn_sp, zeta_sp, lambda_sp 
 
-def calculate_dynamic_latdir(adf_data):
+def calculate_dynamic_latdir(adf_data, input_data):
     """
     This function calculates the dynamic lateral-directional stability
     
     Inputs:
         adf_data: dictionary with the aircraft data
+        input_data: dictionary with the input data
 
     Outputs:
         wn_rs, lambda_rs: results for roll subsidence mode
@@ -562,142 +639,142 @@ def calculate_dynamic_latdir(adf_data):
     CONTROL
     
     """
-    # Num
-    Adj = []
-    ind = np.arange(3)
-    for i in range(3):
-        for j in range(3):
-            if (i+1 + j+1) % 2 == 0:
-                sign = 1
-            else:
-                sign = -1
+    if input_data['plot'] == 1:
+        # Num
+        Adj = []
+        ind = np.arange(3)
+        for i in range(3):
+            for j in range(3):
+                if (i+1 + j+1) % 2 == 0:
+                    sign = 1
+                else:
+                    sign = -1
+                    
+                aux = As[ind != i]
+                aux = aux[:, ind != j]
+                pol = Poly(sign*(aux[0,0] * aux[1,1] - aux[0,1] * aux[1,0]), s)
                 
-            aux = As[ind != i]
-            aux = aux[:, ind != j]
-            pol = Poly(sign*(aux[0,0] * aux[1,1] - aux[0,1] * aux[1,0]), s)
+                Adj.append(pol)
+                
+        Adj = np.reshape(Adj,[3,3])
+        
+        N_beta_delta_a = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,0] + adf_data['Cn_delta_a'] * Adj[2,0]
+        N_phi_delta_a  = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,1] + adf_data['Cn_delta_a'] * Adj[2,1]
+        N_r_delta_a    = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,2] + adf_data['Cn_delta_a'] * Adj[2,2]
+        
+        N_beta_delta_a = [float(N_beta_delta_a.all_coeffs()[k]) for k in range(len(N_beta_delta_a.all_coeffs()))]
+        N_phi_delta_a  = [float(N_phi_delta_a.all_coeffs()[k]) for k in range(len(N_phi_delta_a.all_coeffs()))]
+        N_r_delta_a    = [float(N_r_delta_a.all_coeffs()[k]) for k in range(len(N_r_delta_a.all_coeffs()))]
+        
+        
+        N_beta_delta_r = adf_data['Cy_delta_r'] * Adj[0,0] + adf_data['Cl_delta_r'] * Adj[1,0] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,0]
+        N_phi_delta_r  = adf_data['Cy_delta_r'] * Adj[0,1] + adf_data['Cl_delta_r'] * Adj[1,1] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,1]
+        N_r_delta_r    = adf_data['Cy_delta_r'] * Adj[0,2] + adf_data['Cl_delta_r'] * Adj[1,2] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,2]
+        
+        N_beta_delta_r = [float(N_beta_delta_r.all_coeffs()[k]) for k in range(len(N_beta_delta_r.all_coeffs()))]
+        N_phi_delta_r  = [float(N_phi_delta_r.all_coeffs()[k]) for k in range(len(N_phi_delta_r.all_coeffs()))]
+        N_r_delta_r    = [float(N_r_delta_r.all_coeffs()[k]) for k in range(len(N_r_delta_r.all_coeffs()))]
+        
+        # Den
+        Ds = [A, B, C, D, E]
+        
+        # Transfer function
+        G_beta_delta_a = (N_beta_delta_a, Ds)
+        G_phi_delta_a  = (N_phi_delta_a, Ds)
+        G_r_delta_a    = (N_r_delta_a, Ds)
+        
+        G_beta_delta_r = (N_beta_delta_r, Ds)
+        G_phi_delta_r  = (N_phi_delta_r, Ds)
+        G_r_delta_r    = (N_r_delta_r, Ds)
+        
+        # CHARTS
+        n_points = 500
+        height_in = 11.69
+        width_in  = 8.27
+        font_size = 15
             
-            Adj.append(pol)
+        tf_a = [   G_beta_delta_a,    G_phi_delta_a,    G_r_delta_a]
+        tf_r = [   G_beta_delta_r,    G_phi_delta_r,    G_r_delta_r]
+        yl   = ['$\\Delta\\beta$', '$\\Delta\\Phi$', '$\\Delta\\^r$']
+        xl   = '$\\^t$'
+                    
+        # Response to impulse
+        tit = 'Response to impulse\n $\\delta$a'
+        fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_beta' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_phi' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_r' + '.png']
+        for i in range(len(tf_a)):
+            t, y = signal.impulse(tf_a[i], N=n_points)
+            fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+            ax1.plot(t, y) 
+            ax1.set_xlabel(xl, fontsize=font_size)
+            ax1.set_ylabel(yl[i], fontsize=font_size)
+            ax1.set_title(tit, fontsize=font_size)
+            ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+            ax1.minorticks_on()
+            ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+            ax1.tick_params(labelsize=font_size)
+            fig.tight_layout()
+            fig.savefig(fig_name[i])
+            #plt.show()
             
-    Adj = np.reshape(Adj,[3,3])
-    
-    N_beta_delta_a = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,0] + adf_data['Cn_delta_a'] * Adj[2,0]
-    N_phi_delta_a  = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,1] + adf_data['Cn_delta_a'] * Adj[2,1]
-    N_r_delta_a    = (adf_data['Cl_delta_a_dot']*s + adf_data['Cl_delta_a']) * Adj[1,2] + adf_data['Cn_delta_a'] * Adj[2,2]
-    
-    N_beta_delta_a = [float(N_beta_delta_a.all_coeffs()[k]) for k in range(len(N_beta_delta_a.all_coeffs()))]
-    N_phi_delta_a  = [float(N_phi_delta_a.all_coeffs()[k]) for k in range(len(N_phi_delta_a.all_coeffs()))]
-    N_r_delta_a    = [float(N_r_delta_a.all_coeffs()[k]) for k in range(len(N_r_delta_a.all_coeffs()))]
-    
-    
-    N_beta_delta_r = adf_data['Cy_delta_r'] * Adj[0,0] + adf_data['Cl_delta_r'] * Adj[1,0] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,0]
-    N_phi_delta_r  = adf_data['Cy_delta_r'] * Adj[0,1] + adf_data['Cl_delta_r'] * Adj[1,1] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,1]
-    N_r_delta_r    = adf_data['Cy_delta_r'] * Adj[0,2] + adf_data['Cl_delta_r'] * Adj[1,2] + (adf_data['Cn_delta_r_dot']*s + adf_data['Cn_delta_r']) * Adj[2,2]
-    
-    N_beta_delta_r = [float(N_beta_delta_r.all_coeffs()[k]) for k in range(len(N_beta_delta_r.all_coeffs()))]
-    N_phi_delta_r  = [float(N_phi_delta_r.all_coeffs()[k]) for k in range(len(N_phi_delta_r.all_coeffs()))]
-    N_r_delta_r    = [float(N_r_delta_r.all_coeffs()[k]) for k in range(len(N_r_delta_r.all_coeffs()))]
-    
-    # Den
-    Ds = [A, B, C, D, E]
-    
-    # Transfer function
-    G_beta_delta_a = (N_beta_delta_a, Ds)
-    G_phi_delta_a  = (N_phi_delta_a, Ds)
-    G_r_delta_a    = (N_r_delta_a, Ds)
-    
-    G_beta_delta_r = (N_beta_delta_r, Ds)
-    G_phi_delta_r  = (N_phi_delta_r, Ds)
-    G_r_delta_r    = (N_r_delta_r, Ds)
-    
-    # CHARTS
-    n_points = 500
-    height_in = 11.69
-    width_in  = 8.27
-    font_size = 15
-        
-    tf_a = [   G_beta_delta_a,    G_phi_delta_a,    G_r_delta_a]
-    tf_r = [   G_beta_delta_r,    G_phi_delta_r,    G_r_delta_r]
-    yl   = ['$\\Delta\\beta$', '$\\Delta\\Phi$', '$\\Delta\\^r$']
-    xl   = '$\\^t$'
-                  
-    # Response to impulse
-    tit = 'Response to impulse\n $\\delta$a'
-    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_beta' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_phi' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_a_impulse_r' + '.png']
-    for i in range(len(tf_a)):
-        t, y = signal.impulse(tf_a[i], N=n_points)
-        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
-        ax1.plot(t, y) 
-        ax1.set_xlabel(xl, fontsize=font_size)
-        ax1.set_ylabel(yl[i], fontsize=font_size)
-        ax1.set_title(tit, fontsize=font_size)
-        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
-        ax1.minorticks_on()
-        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
-        ax1.tick_params(labelsize=font_size)
-        fig.tight_layout()
-        fig.savefig(fig_name[i])
-        #plt.show()
-        
-    tit = 'Response to impulse\n $\\delta$r'
-    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_beta' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_phi' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_r' + '.png']    
-    for i in range(len(tf_r)):
-        t, y = signal.impulse(tf_r[i], N=n_points)
-        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
-        ax1.plot(t, y) 
-        ax1.set_xlabel(xl, fontsize=font_size)
-        ax1.set_ylabel(yl[i], fontsize=font_size)
-        ax1.set_title(tit, fontsize=font_size)
-        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
-        ax1.minorticks_on()
-        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
-        ax1.tick_params(labelsize=font_size)
-        fig.tight_layout()
-        fig.savefig(fig_name[i])
-        #plt.show()
-        
-    # Response to step
-    tit = 'Response to step\n $\\delta$a'
-    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_a_step_beta' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_a_step_phi' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_a_step_r' + '.png']
-    for i in range(len(tf_a)):
-        t, y = signal.step(tf_a[i], N=n_points)
-        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
-        ax1.plot(t, y) 
-        ax1.set_xlabel(xl, fontsize=font_size)
-        ax1.set_ylabel(yl[i], fontsize=font_size)
-        ax1.set_title(tit, fontsize=font_size)
-        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
-        ax1.minorticks_on()
-        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
-        ax1.tick_params(labelsize=font_size)
-        fig.tight_layout()
-        fig.savefig(fig_name[i])
-        #plt.show()
-        
-    tit = 'Response to step\n $\\delta$r'
-    fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_r_step_beta' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_r_step_phi' + '.png',
-                out_data['file'][:-4] + '_dynamic_response_delta_r_step_r' + '.png']    
-    for i in range(len(tf_r)):
-        t, y = signal.step(tf_r[i], N=n_points)
-        fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
-        ax1.plot(t, y) 
-        ax1.set_xlabel(xl, fontsize=font_size)
-        ax1.set_ylabel(yl[i], fontsize=font_size)
-        ax1.set_title(tit, fontsize=font_size)
-        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
-        ax1.minorticks_on()
-        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
-        ax1.tick_params(labelsize=font_size)
-        fig.tight_layout()
-        fig.savefig(fig_name[i])
-        #plt.show()
-
+        tit = 'Response to impulse\n $\\delta$r'
+        fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_beta' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_phi' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_r_impulse_r' + '.png']    
+        for i in range(len(tf_r)):
+            t, y = signal.impulse(tf_r[i], N=n_points)
+            fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+            ax1.plot(t, y) 
+            ax1.set_xlabel(xl, fontsize=font_size)
+            ax1.set_ylabel(yl[i], fontsize=font_size)
+            ax1.set_title(tit, fontsize=font_size)
+            ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+            ax1.minorticks_on()
+            ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+            ax1.tick_params(labelsize=font_size)
+            fig.tight_layout()
+            fig.savefig(fig_name[i])
+            #plt.show()
+            
+        # Response to step
+        tit = 'Response to step\n $\\delta$a'
+        fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_a_step_beta' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_a_step_phi' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_a_step_r' + '.png']
+        for i in range(len(tf_a)):
+            t, y = signal.step(tf_a[i], N=n_points)
+            fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+            ax1.plot(t, y) 
+            ax1.set_xlabel(xl, fontsize=font_size)
+            ax1.set_ylabel(yl[i], fontsize=font_size)
+            ax1.set_title(tit, fontsize=font_size)
+            ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+            ax1.minorticks_on()
+            ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+            ax1.tick_params(labelsize=font_size)
+            fig.tight_layout()
+            fig.savefig(fig_name[i])
+            #plt.show()
+            
+        tit = 'Response to step\n $\\delta$r'
+        fig_name = [out_data['file'][:-4] + '_dynamic_response_delta_r_step_beta' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_r_step_phi' + '.png',
+                    out_data['file'][:-4] + '_dynamic_response_delta_r_step_r' + '.png']    
+        for i in range(len(tf_r)):
+            t, y = signal.step(tf_r[i], N=n_points)
+            fig, ax1 = plt.subplots(figsize=(height_in, width_in))  
+            ax1.plot(t, y) 
+            ax1.set_xlabel(xl, fontsize=font_size)
+            ax1.set_ylabel(yl[i], fontsize=font_size)
+            ax1.set_title(tit, fontsize=font_size)
+            ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+            ax1.minorticks_on()
+            ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+            ax1.tick_params(labelsize=font_size)
+            fig.tight_layout()
+            fig.savefig(fig_name[i])
+            #plt.show()
 
     return wn_rs, lambda_rs, wn_spi, lambda_spi, wn_dr, zeta_dr, lambda_dr
 
@@ -713,10 +790,15 @@ def calculate_vmcg(adf_data):
         V: VMCG (kt)
 
     """
+    # Check that take-off condition exists
+    if adf_data['TO_condition'] == 0:
+        return
+
+    # Variable definition
     delta_r = -np.radians(adf_data['delta_r_max']) # engine out iy el delta_a n the right side
-    rho     = get_density(feet_to_meters*adf_data['altitude'])
+    rho     = get_density(0)
     n_lg    = len(adf_data['lg_x'])
-    Vsr     = get_stall_speed(adf_data['m'], rho, adf_data['S'], adf_data['CL_max'])
+    Vsr     = get_stall_speed(adf_data['TOW_min'], rho, adf_data['S'], adf_data['CL_max_TO'])
 
     # Propulsion
     critical_eng = get_critical_engine(adf_data)
@@ -736,8 +818,8 @@ def calculate_vmcg(adf_data):
     def equations_aprox(var):
         V, beta = var
 
-        eq2 = Ft_y + 0.5*rho*V**2*adf_data['S']*(adf_data['Cy_beta']*beta + adf_data['Cy_delta_r']*delta_r)
-        eq6 = Nt + 0.5*rho*V**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta']*beta + adf_data['Cn_delta_r']*delta_r)
+        eq2 = Ft_y + 0.5*rho*V**2*adf_data['S']*(adf_data['Cy_beta_TO']*beta + adf_data['Cy_delta_r_TO']*delta_r)
+        eq6 = Nt + 0.5*rho*V**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta_TO']*beta + adf_data['Cn_delta_r_TO']*delta_r)
 
         return [eq2, eq6]
 
@@ -749,11 +831,11 @@ def calculate_vmcg(adf_data):
     def equations(var):
         x = var
 
-        eq2 = Ft_y + 0.5*rho*x[0]**2*adf_data['S']*(adf_data['Cy_beta']*x[1] + adf_data['Cy_delta_r']*delta_r) + x[2]*x[1]*sum(x[3+i] for i in range(n_lg))
-        eq3 = Ft_z + adf_data['TOW_min']*g + 0.5*rho*x[0]**2*adf_data['S']*adf_data['Cz_0'] + sum(x[3+i] for i in range(n_lg))
-        eq4 = Lt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cl_beta']*x[1] + adf_data['Cl_delta_r']*delta_r) + sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) - x[2]*x[1]*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
-        eq5 = Mt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['c']*adf_data['Cm_0'] - sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg)) + adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
-        eq6 = Nt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta']*x[1] + adf_data['Cn_delta_r']*delta_r) - adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) + x[2]*x[1]*sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg))
+        eq2 = Ft_y + 0.5*rho*x[0]**2*adf_data['S']*(adf_data['Cy_beta_TO']*x[1] + adf_data['Cy_delta_r_TO']*delta_r) + x[2]*x[1]*sum(x[3+i] for i in range(n_lg))
+        eq3 = Ft_z + adf_data['TOW_min']*g + 0.5*rho*x[0]**2*adf_data['S']*adf_data['Cz_0_TO'] + sum(x[3+i] for i in range(n_lg))
+        eq4 = Lt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cl_beta_TO']*x[1] + adf_data['Cl_delta_r_TO']*delta_r) + sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) - x[2]*x[1]*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
+        eq5 = Mt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['c']*adf_data['Cm_0_TO'] - sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg)) + adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
+        eq6 = Nt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta_TO']*x[1] + adf_data['Cn_delta_r_TO']*delta_r) - adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) + x[2]*x[1]*sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg))
         eq7 = -x[2] + 2369.074348*abs(x[1])**5 - 1268.0219021*abs(x[1])**4 + 24.6344543*abs(x[1])**3 + 3.1599044*abs(x[1])**2 + 5.2489678*abs(x[1]) + 0.0086458
 
         return [eq2, eq3, eq4, eq5, eq6, eq7]
@@ -764,7 +846,7 @@ def calculate_vmcg(adf_data):
     ini[0]  = V_ini
     ini[1]  = beta_ini
     ini[2]  = 2369.074348*abs(beta_ini)**5 - 1268.0219021*abs(beta_ini)**4 + 24.6344543*abs(beta_ini)**3 + 3.1599044*abs(beta_ini)**2 + 5.2489678*abs(beta_ini) + 0.0086458
-    ini[3:] = [-(adf_data['TOW_min']*g+0.5*rho*V_ini**2*adf_data['S']*adf_data['Cz_0'])/n_lg for i in range(n_lg)]
+    ini[3:] = [-(adf_data['TOW_min']*g+0.5*rho*V_ini**2*adf_data['S']*adf_data['Cz_0_TO'])/n_lg for i in range(n_lg)]
     
     x = fsolve(equations, ini)
     
@@ -775,7 +857,7 @@ def calculate_vmcg(adf_data):
 
     return V
 
-def calculate_vmca(adf_data):
+def calculate_vmca(adf_data, input_data):
     """
     For a right engine failure must be:
     (phi      [deg]) Fixed Negative for right engine failure
@@ -785,6 +867,11 @@ def calculate_vmca(adf_data):
     VMCA vs WEIGHT RANGE TABLE
     VMCA FOR m WEIGHT PREDEFINED VALUE
     """
+
+    # Check that take-off condition exists
+    if adf_data['TO_condition'] == 0:
+        return ['None']*3
+
     # Variable definition
     rho = get_density(0)
     di  = 2.0
@@ -816,17 +903,17 @@ def calculate_vmca(adf_data):
     delta_r_max = -np.radians(adf_data['delta_r_max'])
 
     # Beta, VMCA_cross and W_cross for delta_a_max and delta_r_max   (1)
-    A = np.array([[adf_data['Cl_beta'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
-                  [adf_data['Cn_beta'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+    A = np.array([[adf_data['Cl_beta_TO'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                  [adf_data['Cn_beta_TO'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
 
-    b = np.array([[-adf_data['Cl_delta_r'] * delta_r_max - adf_data['Cl_delta_a'] * delta_a_max],
-                  [-adf_data['Cn_delta_r'] * delta_r_max - adf_data['Cn_delta_a'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+    b = np.array([[-adf_data['Cl_delta_r_TO'] * delta_r_max - adf_data['Cl_delta_a_TO'] * delta_a_max],
+                  [-adf_data['Cn_delta_r_TO'] * delta_r_max - adf_data['Cn_delta_a_TO'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
 
     X = np.linalg.solve(A,b)
 
     betacross     = np.degrees(X[0])
     VMCAcross     = ((X[1])**(-0.5))/kt_to_ms
-    Cy            = (adf_data['Cy_beta'] * X[0] + adf_data['Cy_delta_a'] * delta_a_max + adf_data['Cy_delta_r'] * delta_r_max)
+    Cy            = (adf_data['Cy_beta_TO'] * X[0] + adf_data['Cy_delta_a_TO'] * delta_a_max + adf_data['Cy_delta_r_TO'] * delta_r_max)
     Wcross        = -(Ft_y + 0.5 * rho * X[1]**(-1) * adf_data['S'] * Cy) / (g * math.sin(np.radians(fixed_phi)))
 
     if adf_data['TOW_min'] <= Wcross <= adf_data['TOW_max']:
@@ -837,15 +924,15 @@ def calculate_vmca(adf_data):
         weight_vector = np.append(weight_vector, Wcross)    
 
     # VMCA for a given weight delta_r_max or delta_a_max
-    for W in np.arange(adf_data['TOW_min'], adf_data['TOW_max'], adf_data['dW']):
+    for W in np.arange(adf_data['TOW_min'], adf_data['TOW_max'] + 1, adf_data['dW']):
         if W < Wcross: # delta_r_max
-            A = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_a'], (W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S'])],
-                          [adf_data['Cl_beta'], adf_data['Cl_delta_a'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
-                          [adf_data['Cn_beta'], adf_data['Cn_delta_a'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+            A = np.array([[adf_data['Cy_beta_TO'], adf_data['Cy_delta_a_TO'], (W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S'])],
+                          [adf_data['Cl_beta_TO'], adf_data['Cl_delta_a_TO'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta_TO'], adf_data['Cn_delta_a_TO'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
 
-            b = np.array([[-adf_data['Cy_delta_r'] * delta_r_max],
-                          [-adf_data['Cl_delta_r'] * delta_r_max],
-                          [-adf_data['Cn_delta_r'] * delta_r_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+            b = np.array([[-adf_data['Cy_delta_r_TO'] * delta_r_max],
+                          [-adf_data['Cl_delta_r_TO'] * delta_r_max],
+                          [-adf_data['Cn_delta_r_TO'] * delta_r_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
 
             X = np.linalg.solve(A,b)
             
@@ -856,13 +943,13 @@ def calculate_vmca(adf_data):
             VMCA          = np.append(VMCA, ((X[2])**(-0.5))/kt_to_ms)
 
         if W > Wcross: # delta_a_max
-            A = np.array([[adf_data['Cy_beta'], adf_data['Cy_delta_r'], ((W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S']))],
-                          [adf_data['Cl_beta'], adf_data['Cl_delta_r'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
-                          [adf_data['Cn_beta'], adf_data['Cn_delta_r'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+            A = np.array([[adf_data['Cy_beta_TO'], adf_data['Cy_delta_r_TO'], ((W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S']))],
+                          [adf_data['Cl_beta_TO'], adf_data['Cl_delta_r_TO'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta_TO'], adf_data['Cn_delta_r_TO'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
 
-            b = np.array([[-adf_data['Cy_delta_a'] * delta_a_max],
-                          [-adf_data['Cl_delta_a'] * delta_a_max],
-                          [-adf_data['Cn_delta_a'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+            b = np.array([[-adf_data['Cy_delta_a_TO'] * delta_a_max],
+                          [-adf_data['Cl_delta_a_TO'] * delta_a_max],
+                          [-adf_data['Cn_delta_a_TO'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
 
             X = np.linalg.solve(A,b)
 
@@ -885,37 +972,36 @@ def calculate_vmca(adf_data):
     VMCA_m  = f(adf_data['m'])
 
     # Calculate Vsr
-    Vsr = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max']) for W in weight_vector]
-    Vsr = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max'])/kt_to_ms for W in weight_vector]
-
+    Vsr  = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max_TO'])/kt_to_ms for W in weight_vector]
     KVsr = np.multiply(Vsr, 1.13)
 
     # Plot Vmca and 1.13Vsr for each weight
-    height_in = 11.69
-    width_in  = 8.27
-    font_size = 15  
+    if input_data['plot'] == 1: 
+        height_in = 11.69
+        width_in  = 8.27
+        font_size = 15  
 
-    fig_name = out_data['file'][:-4] + '_VMCA.png'
-    xl  = 'Weight (kg)'
-    yl  = 'Speed (kt)'
-    tit = '$V_{MCA}$'
+        fig_name = out_data['file'][:-4] + '_VMCA.png'
+        xl  = 'Weight (kg)'
+        yl  = 'Speed (kt)'
+        tit = '$V_{MCA}$'
 
-    fig, ax1 = plt.subplots(figsize=(height_in, width_in))
-    ax1.plot(weight_vector, VMCA, color = 'tab:blue', label = '$V_{MCA}$')
-    ax1.plot(weight_vector, KVsr, color = 'tab:red', label = '$1.13V_{SR}$')
+        fig, ax1 = plt.subplots(figsize=(height_in, width_in))
+        ax1.plot(weight_vector, VMCA, color = 'tab:blue', label = '$V_{MCA}$')
+        ax1.plot(weight_vector, KVsr, color = 'tab:red', label = '$1.13V_{SR}$')
 
-    ax1.set_xlabel(xl, fontsize=font_size)
-    ax1.set_ylabel(yl, fontsize=font_size)
-    ax1.set_title(tit, fontsize=font_size)
-    
-    ax1.grid(b=True, which='major', color='#666666', linestyle='-')
-    ax1.minorticks_on()
-    ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
-    ax1.tick_params(labelsize=font_size)
-    ax1.legend(loc='best')
+        ax1.set_xlabel(xl, fontsize=font_size)
+        ax1.set_ylabel(yl, fontsize=font_size)
+        ax1.set_title(tit, fontsize=font_size)
+        
+        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+        ax1.minorticks_on()
+        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+        ax1.tick_params(labelsize=font_size)
+        ax1.legend(loc='best')
 
-    fig.tight_layout()
-    fig.savefig(fig_name)
+        fig.tight_layout()
+        fig.savefig(fig_name)
    
     return weight_vector, VMCA, VMCA_m
 
@@ -938,13 +1024,23 @@ def write_output_file(out_data, input_data):
         f.write('\n')
         
         # AIRCRAFT AND CONDITIONS
-        f.write(' Aircraft  : ' + input_data['aircraft'] + '\n')
-        f.write(' Condition : ' + '{:.0f}'.format(input_data['condition']) + '\n')
-        f.write(' Altitude  : ' + '{:.1f}'.format(out_data['altitude']) + ' ft\n')
+        f.write(' Aircraft     : ' + input_data['aircraft'] + '\n')
+        # variable = ['Fuselage', 'Wing', 'Tail', 'Prop_dist', 'Prop_tip', 'Prop_tail','Air_inlet', 'Canard']
+        # string = [' Configuration: ']
+        # for var in variable:
+        #     string.append(var + ': ' + aircraft_config[var] + ' | ')
+        # string = ''.join(string) + '\n'
+        # f.write(string)
+        f.write(' Configuration: ' + '\n')
+        variable = ['Fuselage', 'Wing', 'Tail', 'Prop_dist', 'Prop_tip', 'Prop_tail','Air_inlet', 'Canard']
+        for var in variable:
+            f.write(' '*5 + '{:<9s}'.format(var) + ': ' + aircraft_config[var] + '\n')
+        f.write(' Condition    : ' + '{:.0f}'.format(input_data['condition']) + '\n')
+        f.write(' Altitude     : ' + '{:.1f}'.format(out_data['altitude']) + ' ft\n')
         if out_data['speed'] < 5.0:
-            f.write('     Speed : M' + '{:.2f}'.format(out_data['speed']) + '\n')
+            f.write(' Speed        : M' + '{:.2f}'.format(out_data['speed']) + '\n')
         else:
-            f.write('     Speed : ' + '{:.1f}'.format(out_data['speed']) + ' kt\n')
+            f.write(' Speed        : ' + '{:.1f}'.format(out_data['speed']) + ' kt\n')
         
         f.write('\n')
         
@@ -1130,45 +1226,49 @@ def write_output_file(out_data, input_data):
 
             # VSR
             f.write('{:>11s}'.format('VSR :') + '{:8.3f}'.format(out_data['Vsr']/kt_to_ms) + ' kt\n')
-            f.write('\n')
 
             # VMCG
-            f.write('{:>11s}'.format('VMCG :') + '{:8.3f}'.format(out_data['VMCG']) + ' kt\n')
-            f.write('\n')
+            if adf_data['TO_condition'] == 0:
+                f.write('      VMCG not caclculated: There is no data for take-off condition\n')
+            else:
+                f.write('{:>11s}'.format('VMCG :') + '{:8.3f}'.format(out_data['VMCG']) + ' kt\n')
             
             # VMCA
-            f.write('{:>11s}'.format('VMCA :') + '{:8.3f}'.format(out_data['VMCA_m']) + ' kt\n')
-            f.write('\n')
+            if adf_data['TO_condition'] == 0:
+                f.write('      VMCA not caclculated: There is no data for take-off condition\n')
+            else:
+                f.write('{:>11s}'.format('VMCA :') + '{:8.3f}'.format(out_data['VMCA_m']) + ' kt\n')
+                f.write('\n')
 
-            header   = [        'Weight', 'VMCA']
-            units    = [            'kg',   'kt']
-            variable = [ 'weight_vector', 'VMCA']
+                header   = [        'Weight', 'VMCA']
+                units    = [            'kg',   'kt']
+                variable = [ 'weight_vector', 'VMCA']
 
-            f.write('VMCA vs weight:\n')
+                f.write('VMCA vs weight:\n')
 
-            # Header
-            string = ['{:>11s}'.format(s) for s in header]
-            string = ''.join(string) + '\n'
-            f.write(string)
-
-            # Units
-            string = ['{:>11s}'.format(s) for s in units]
-            string = ''.join(string) + '\n'
-            f.write(string)
-
-            # Line
-            string = '    ' + '-' * (11 * len(header) - 4) + '\n'
-            f.write(string)
-
-            # Variables
-            for i in range(len(out_data['weight_vector'])):
-                string = out_data[variable[0]][i]
-                string = np.append(string, [out_data[var][i] for var in variable[1:]])
-                string = ['{:>11.3f}'.format(s) for s in string]
+                # Header
+                string = ['{:>11s}'.format(s) for s in header]
                 string = ''.join(string) + '\n'
-                f.write(string) 
+                f.write(string)
 
-            f.write('\n')
+                # Units
+                string = ['{:>11s}'.format(s) for s in units]
+                string = ''.join(string) + '\n'
+                f.write(string)
+
+                # Line
+                string = '    ' + '-' * (11 * len(header) - 4) + '\n'
+                f.write(string)
+
+                # Variables
+                for i in range(len(out_data['weight_vector'])):
+                    string = out_data[variable[0]][i]
+                    string = np.append(string, [out_data[var][i] for var in variable[1:]])
+                    string = ['{:>11.3f}'.format(s) for s in string]
+                    string = ''.join(string) + '\n'
+                    f.write(string) 
+
+                f.write('\n')
                                   
 """
 MAIN PROGRAM
@@ -1191,12 +1291,12 @@ g              = 9.80665
 #                                    INPUT                                     #
 ################################################################################
 # Define input file path
-file = './study2/LS.dat'
+file = './input_file_template.dat'
 
 ################################################################################
 
 # Read input and aircraft data
-input_data, adf_data = read_input_file(file)
+input_data, adf_data, aircraft_config = read_input_file(file)
 
 # Initialize output dictionary
 out_data = {}
@@ -1215,17 +1315,17 @@ if input_data['type'] == 2 or input_data['type'] == 0:
 
 # Dynamic - longitudinal 
 if input_data['type'] == 3 or input_data['type'] == 0:
-    out_data['wn_ph'], out_data['zeta_ph'], out_data['lambda_ph'], out_data['wn_sp'], out_data['zeta_sp'], out_data['lambda_sp'] = calculate_dynamic_long(adf_data)    
+    out_data['wn_ph'], out_data['zeta_ph'], out_data['lambda_ph'], out_data['wn_sp'], out_data['zeta_sp'], out_data['lambda_sp'] = calculate_dynamic_long(adf_data, input_data)    
 
 # Dynamic - longitudinal 
 if input_data['type'] == 4 or input_data['type'] == 0:
-    out_data['wn_rs'], out_data['lambda_rs'], out_data['wn_spi'], out_data['lambda_spi'], out_data['wn_dr'], out_data['zeta_dr'], out_data['lambda_dr'] = calculate_dynamic_latdir(adf_data)    
+    out_data['wn_rs'], out_data['lambda_rs'], out_data['wn_spi'], out_data['lambda_spi'], out_data['wn_dr'], out_data['zeta_dr'], out_data['lambda_dr'] = calculate_dynamic_latdir(adf_data, input_data)    
 
 # Minimum  speeds
 if input_data['type'] == 5 or input_data['type'] == 0: 
     out_data['Vsr']  = get_stall_speed(adf_data['m'], get_density(adf_data['altitude']*feet_to_meters), adf_data['S'], adf_data['CL_max'])
     out_data['VMCG'] = calculate_vmcg(adf_data)
-    out_data['weight_vector'], out_data['VMCA'], out_data['VMCA_m'] = calculate_vmca(adf_data)
+    out_data['weight_vector'], out_data['VMCA'], out_data['VMCA_m'] = calculate_vmca(adf_data, input_data)
       
 # PRINT RESULTS   
 write_output_file(out_data, input_data)
