@@ -91,7 +91,7 @@ def read_adf_file(file, condition):
         elif title in T_array: # Select thrust por the desired condition
             if title == T_condition:
                 adf_data['T'] = np.asarray(variable_data[index], dtype=np.float64, order='C')
-        else: # Get coefs for desired conditin, TO and LD (if exist)
+        else: # Get coeffs for desired condition, TO and LD (if exist)
             adf_data[title] = np.asarray(variable_data[index], dtype=np.float64, order='C')[ind]
             if adf_data['TO_condition'] != 0:
                 ind_TO = int(adf_data['TO_condition'] - 1)
@@ -924,7 +924,7 @@ def calculate_vmca(adf_data, input_data):
         weight_vector = np.append(weight_vector, Wcross)    
 
     # VMCA for a given weight delta_r_max or delta_a_max
-    for W in np.arange(adf_data['TOW_min'], adf_data['TOW_max'], adf_data['dW']):
+    for W in np.arange(adf_data['TOW_min'], adf_data['TOW_max'] + 1, adf_data['dW']):
         if W < Wcross: # delta_r_max
             A = np.array([[adf_data['Cy_beta_TO'], adf_data['Cy_delta_a_TO'], (W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S'])],
                           [adf_data['Cl_beta_TO'], adf_data['Cl_delta_a_TO'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
