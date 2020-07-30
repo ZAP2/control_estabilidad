@@ -26,7 +26,7 @@
 ######################################################################
 #                        REFERENCE CONDITIONS                        #
 #                                                                    #
-#    n_conditions : number of conditions defined in the ADF          #
+#    n_conditions : Number of conditions defined in the ADF          #
 #    TO_condition : Position of the defined take-off condition       #
 #                   (0 if there is no take-off condition)            #
 #    LD_condition : Position of the defined landing condition        #
@@ -37,10 +37,11 @@
 
      n_conditions : 2
      TO_condition : 1
-     LD_condition : 0
+     LD_condition : 1
 
 #                     LS       HS
 #                  -------- --------
+              ISA :     0.0,     0.0
          altitude :     0.0, 40000.0
             speed :    0.25,    0.80  
 

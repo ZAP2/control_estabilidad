@@ -2,6 +2,7 @@
 """
    FLIGHT MECHANICS
 """
+import sys
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,18 +11,22 @@ from scipy import signal
 from scipy.optimize import fsolve
 from scipy.interpolate import interp1d
 
+# Import utilities
+sys.path.insert(1, '/Users/Public/Python/Utilities')
+from atmos import Atmos
+from speed import Speed
 
 def read_input_file(file):
-    """ 
-    This function reads the input file into a dict
-    
-    Inputs:
-        file: Path to the input file
-        
-    Outputs:
-        input_data: Dictionary with the input file variables
-        adf_data: Dictionary with the aircraft data for the selected condition
-    
+    """Function to read input file into a dictionary
+
+    Args:
+        file (str): Path to the input file.
+
+    Returns:
+        input_data (dict): Dictionary with the input file variables.
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+        aircraft_config (dict): Dictionary with the aircraft configuration.
+
     """
     with open(file,'r') as f:
         lines = [line.strip().split(':') for line in f.readlines() if (line.strip() and not line.startswith("#"))]
@@ -50,16 +55,15 @@ def read_input_file(file):
     return input_data, adf_data, aircraft_config
 
 def read_adf_file(file, condition):
-    """ 
-    This function reads the adf file into a dict
-    
-    Inputs:
-        file: Path to the adf 
-        condition: selected aircraft condition
-        
-    Outputs:
-        adf_data: Dictionary with the aircraft data for the selected condition
-    
+    """Function to read adf file into a dictionary
+
+    Args:
+        file (str): Path to the adf file.
+        condition (int): Condition of study
+
+    Returns:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+
     """
 
     ind = condition - 1
@@ -76,7 +80,7 @@ def read_adf_file(file, condition):
                      'TOW_min', 'TOW_max', 'LW_min', 'LW_max', 'dW', 'delta_a_max', 'delta_r_max',
                      'S', 'c', 'b', 'n_eng', 'mu_gr']
     common_array  = ['TOGA', 'epsilon', 'ni', 'eng_x', 'eng_y', 'eng_z', 'lg_x', 'lg_y', 'lg_z']
-    cond_filter   = ['altitude', 'speed', 'm', 'Ix', 'Iy', 'Iz', 'Jxz']                 
+    cond_filter   = ['ISA', 'altitude', 'speed', 'm', 'Ix', 'Iy', 'Iz', 'Jxz']                 
     T_array       = ['T' + str(i) for i in range(20)]
     T_condition   = 'T' + str(condition)
     for index, title in enumerate(variable_name):
@@ -105,32 +109,35 @@ def read_adf_file(file, condition):
     adf_data['LD_condition'] = int(adf_data['LD_condition'])
     adf_data['n_eng']        = int(adf_data['n_eng'])
 
-    # Get speed in Mach and KTAS
-    a = get_speed_of_sound(feet_to_meters * adf_data['altitude'])
+    # Get speed in Mach, KCAS and KTAS
     if adf_data['speed'] < 5.0 :
         adf_data['Mach'] = adf_data['speed']
-        adf_data['KTAS'] = (adf_data['Mach'] * a) / kt_to_ms
+        adf_data['KCAS'] = Speed.mach_to_cas(adf_data['Mach'], adf_data['altitude']*feet_to_meters) / kt_to_ms
+        adf_data['KTAS'] = Speed.mach_to_tas(adf_data['Mach'], adf_data['altitude']*feet_to_meters, adf_data['ISA']) / kt_to_ms
     else:
-        adf_data['KTAS'] = adf_data['speed']
-        adf_data['Mach'] = (kt_to_ms * adf_data['KTAS']) / a 
+        adf_data['KCAS'] = adf_data['speed']
+        adf_data['KTAS'] = Speed.cas_to_tas(adf_data['KCAS']*kt_to_ms, adf_data['altitude']*feet_to_meters, adf_data['ISA']) / kt_to_ms
+        adf_data['Mach'] = Speed.cas_to_mach(adf_data['KCAS']*kt_to_ms, adf_data['altitude']*feet_to_meters)
         
     # Get Cz_s for the stability condition
-    rho = get_density(feet_to_meters * adf_data['altitude'])
+    rho = Atmos.get_density(feet_to_meters * adf_data['altitude'], adf_data['ISA'])
     p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
     adf_data['Cz_s'] = -(adf_data['m'] * g) / (p_d * adf_data['S'])
     
     return adf_data
 
 def read_aircraft_config(adf_data):
-    """ 
-    This function reads the adf file into a dict
-    
-    Inputs:
-        adf_data: dictionary with the adf data
-    Outputs:
-        aircraft_config: Description related with the aircraft code
-    
+    """Function to read the aircraf configuration into a dictionary
+
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+
+    Returns:
+        aircraft_config (dict): Dictionary with the aircraft configuration.
+
     """
+
+    
     aircraft_config = {}
 
     component = ['Fuselage', 'Wing', 'Tail', 'Prop_dist', 'Prop_tip', 'Prop_tail','Air_inlet', 'Canard']
@@ -172,118 +179,50 @@ def read_aircraft_config(adf_data):
     
     return aircraft_config
 
-def get_temperature (altitude):
-    """
-    This function calculates the temperature for a given altitude
-    
-    Inputs:
-        altitude: Flight altitude (m)
-        
-    Outputs:
-        T: Temperature (K)
-    
-    """
-    alpha_T  = 6.5e-3
-    T_0     = 288.15
+def get_dynamic_pressure(density, speed):
+    """Function to calculate the dynamic pressure for a given density and speed
 
-    if altitude <= 11000.0:    
-        T = T_0 - alpha_T * altitude
-    else:
-        T = T_0 - alpha_T * 11000.0
-    
-    return T
+    Args:
+        density (float): Air density (kg/m3).
+        speed (float): True air speed (m/s).
 
-def get_density (altitude):
-    """
-    This function calculates the air density for a given altitude
-    
-    Inputs:
-        altitude: Flight altitude (m)
-        
-    Outputs:
-        rho: Air density (kg/m3)
-    
-    """
-    rho_0   = 1.225
-    alpha_T  = 6.5e-3
-    T_0     = 288.15
-    Ra      = 287.05
-    
-    if altitude <= 11000.0:    
-        rho = rho_0 * ((1 - (alpha_T * altitude)/T_0) ** ((g/(Ra * alpha_T)) - 1))
-    else:
-        rho_11 = rho_0 * ((1 - (alpha_T * 11000.0)/T_0) ** ((g/(Ra * alpha_T)) - 1))
-        T_11   = 216.65
-        rho    = rho_11 * math.e ** (-g * (altitude - 11000.0) / (Ra * T_11))
-    
-    return rho
+    Returns:
+        p_d (float): Dynamic pressure (N/m2).
 
-def get_speed_of_sound (altitude):
     """
-    This function calculates the speed of sound for a given altitude
-    
-    Inputs:
-        altitude: Flight altitude (m)
-        
-    Outputs:
-        a: speed of sound (m/s)
-    
-    """
-    gamma = 1.4
-    R     = 286.0
-    
-    T = get_temperature(altitude)
-    
-    a = (gamma * R * T) ** 0.5
-    
-    return a
-
-def get_dynamic_pressure(rho,speed):
-    """
-    This function calculates the dynamic pressure for a given density and speed
-    
-    Inputs:
-        rho: Air density (kg/m3)
-        speed : Speed (m/s)
-        
-    Outputs:
-        p_d: Dynamic pressure (N/m2)
-    
-    """
-    
-    p_d = 0.5 * rho * speed ** 2
+    p_d = 0.5*density*speed ** 2
     
     return p_d
 
-def get_stall_speed(m, rho, S, CL_max):
-    """
-    This function calculates the reference stall speed (Vsr)
-    
-    Inputs:
-        m: weight (kg)
-        rho: air density (kg/m3)
-        S: wing surface (m2)
-        CL_max: Maximum lift coefficient (-)
-        
-    Outputs:
-        Vsr: reference stall speed (m/s)
+def get_stall_speed(m, density, S, CL_max):
+    """Function to calculate the reference stall speed (Vsr)
+
+    Args:
+        m (float): Weight (kg)
+        density (float): Air density (kg/m3).
+        S (float): Wing surface (m2)
+        CL_max (float): Maximum lift coefficient (-)
+
+    Returns:
+        Vsr (float): Reference stall speed (m/s).
 
     """
-    Vsr = ((m*g)/(0.5*rho*S*CL_max))**0.5
+
+    Vsr = ((m*g)/(0.5*density*S*CL_max))**0.5
 
     return Vsr
 
 def get_critical_engine(adf_data):
-    """
-    This function calculates the most critical engine in case of failure
-    
-    Inputs:
-        adf_data: dictionary with the aircraft data
-        
-    Outputs:
-        critical_eng: most critical engine
+    """Function to calculate the most critical engine in case of failure
+
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+
+    Returns:
+       critical_eng (int): Index of the most critical engine.
 
     """
+
     Nt = [adf_data['TOGA'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
           math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in range(adf_data['n_eng'])]
     
@@ -292,21 +231,22 @@ def get_critical_engine(adf_data):
     return critical_eng
 
 def calculate_static_long(adf_data, input_data):
+    """Function to calculate the static longitudinal stability and control
+
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+        input_data (dict): Dictionary with the input file variables.
+
+    Returns:
+        alpha_trim (float): Trim angle of attack (deg).
+        delta_e_trim (float): Elevator deflection for trim (deg).
+        alpha (float): List of angle of attack (deg).
+        delta_e (float): Elevator deflection for alpha (deg).
+
     """
-    This function calculates the static longitudinal stability and control
-    
-    Inputs:
-        adf_data: dictionary with the aircraft data
-        input_data: dictionary with the input data
-        
-    Outputs:
-        alpha_trim, delta_e_trim : Trim values (deg)
-        alpha, delta_e : Elevator deflection vs. alpha (deg)   
-        
-    """  
 
     # Intermediate calculations   
-    rho = get_density(feet_to_meters * adf_data['altitude'])
+    rho = atmos.density
     p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
     
     """
@@ -351,22 +291,25 @@ def calculate_static_long(adf_data, input_data):
     return alpha_trim, delta_e_trim, delta_e
 
 def calculate_static_latdir(adf_data, input_data):
+    """Function to calculate the static lateral-directionsl stability 
+
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+        input_data (dict): Dictionary with the input file variables.
+
+    Returns:
+        phi_b (float): Roll angle for trimming at given beta (deg).
+        delta_a_b (float): Aileron deflection for trimming at given beta (deg).
+        delta_r_b (float): Rudder deflection for trimming at given beta (deg).
+        beta_p (float): Sidesleep angle for stationary turn at given phi (deg).
+        delta_a_p (float): Aileron deflection for stationary turn at given phi (deg).
+        delta_r_p (float): Rudder deflection for stationary turn at given phi (deg).
+        n_p (float): Load factor in a stationary turn at given phi (deg).
     """
-    This function calculates the static lateral-directionsl stability 
-    and control
-    
-    Inputs:
-        adf_data: dictionary with the aircraft data
-        input_data: dictionary with the input data
-        
-    Outputs:
-        phi_b, delta_a_b, delta_r_b: Trim values for a given beta
-        beta_p, delta_a_p, delta_r_p, n_p: Trim values for a stationary turn (fixed phi)
-    
-    """  
-    
+
+
     # Intermediate calculations   
-    rho = get_density(feet_to_meters * adf_data['altitude'])
+    rho = atmos.density
     p_d = get_dynamic_pressure(rho, kt_to_ms * adf_data['KTAS'])
     
     # Propulsion   
@@ -430,22 +373,24 @@ def calculate_static_latdir(adf_data, input_data):
     return phi_b, delta_a_b, delta_r_b, beta_p, delta_a_p, delta_r_p, n_p
 
 def calculate_dynamic_long(adf_data, input_data):
-    """
-    This function calculates the dynamic longitudinal stability
-    
-    Inputs:
-        adf_data: dictionary with the aircraft data
-        input_data: dictionary with the input data
+    """Function to calculate the static lateral-directionsl stability 
 
-    Outputs:
-        wn_ph, zeta_ph, lambda_ph: results for phugoide mode
-        wn_sp, zeta_sp, lambda_sp: results for short period mode
-        
-        control response charts
-    
-    """  
-    
-    rho = get_density(feet_to_meters * adf_data['altitude'])
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+        input_data (dict): Dictionary with the input file variables.
+
+    Returns:
+        wn_ph (float): Natural frequency in phugoide mode (1/s).
+        zeta_ph (float): Dumping coefficient in phugoide mode (-).
+        lambda_ph (float): Eigenvalues in phugoide mode (-).
+        wn_sp (float): Natural frequency in short period mode (1/s).
+        zeta_sp (float): Dumping coefficient in short period mode (-).
+        lambda_sp (float): Natural frequency in short period mode (1/s).
+        Control response charts
+    """
+
+
+    rho = atmos.density
     
     mu = adf_data['m'] / (0.5 * rho * adf_data['S'] *  adf_data['c'])
     
@@ -574,23 +519,24 @@ def calculate_dynamic_long(adf_data, input_data):
     return wn_ph, zeta_ph, lambda_ph, wn_sp, zeta_sp, lambda_sp 
 
 def calculate_dynamic_latdir(adf_data, input_data):
-    """
-    This function calculates the dynamic lateral-directional stability
-    
-    Inputs:
-        adf_data: dictionary with the aircraft data
-        input_data: dictionary with the input data
+    """Function to calculate the dynamic lateral-directional stability
 
-    Outputs:
-        wn_rs, lambda_rs: results for roll subsidence mode
-        wn_spi, lambda_spi: results for spiral mode
-        wn_dr, zeta_dr, lambda_dr: results for dutch roll mode
-        
-        control response charts
-    
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+        input_data (dict): Dictionary with the input file variables.
+
+    Returns:
+        wn_rs (float): Natural frequency in roll subsidence mode (1/s).
+        lambda_rs (float): Eigenvalues in roll subsidence mode (-).
+        wn_spi (float): Natural frequency in spiral mode (1/s).
+        lambda_spi (float): Eigenvalues in spiral mode (-).
+        wn_dr (float): Natural frequency in dutch roll mode (1/s).
+        zeta_dr (float): Dumping coefficient in dutch roll mode (-).
+        lambda_dr (float): Eigenvalues in dutch roll mode (-).
+        Control response charts
     """
     
-    rho = get_density(feet_to_meters * adf_data['altitude'])
+    rho = atmos.density
     
     mu = adf_data['m'] / (0.5 * rho * adf_data['S'] *  adf_data['b'])
     
@@ -779,26 +725,26 @@ def calculate_dynamic_latdir(adf_data, input_data):
     return wn_rs, lambda_rs, wn_spi, lambda_spi, wn_dr, zeta_dr, lambda_dr
 
 def calculate_vmcg(adf_data):
-    """
-    This function calculates the minimum control speed on ground (VMCG)
+    """Function to calculate the minimum control speed on the ground (VMCG)
     For the Take-off thrust at SL and ISA conditions
-    
-    Inputs:
-        adf_data: dictionary with the aircraft data
-        
-    Outputs:
-        V: VMCG (kt)
 
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+
+    Returns:
+        VMCG (float): Minimum control speed on the groung (kt).
     """
     # Check that take-off condition exists
     if adf_data['TO_condition'] == 0:
         return
 
     # Variable definition
-    delta_r = -np.radians(adf_data['delta_r_max']) # engine out iy el delta_a n the right side
-    rho     = get_density(0)
-    n_lg    = len(adf_data['lg_x'])
-    Vsr     = get_stall_speed(adf_data['TOW_min'], rho, adf_data['S'], adf_data['CL_max_TO'])
+    rho = Atmos.get_density(0.0, 0.0)
+    n_lg = len(adf_data['lg_x'])
+    Vsr = get_stall_speed(adf_data['TOW_min'], rho, adf_data['S'], adf_data['CL_max_TO'])
+
+    # Control limit
+    delta_r_max = -np.radians(adf_data['delta_r_max']) # Negative due to right engine failure
 
     # Propulsion
     critical_eng = get_critical_engine(adf_data)
@@ -818,24 +764,24 @@ def calculate_vmcg(adf_data):
     def equations_aprox(var):
         V, beta = var
 
-        eq2 = Ft_y + 0.5*rho*V**2*adf_data['S']*(adf_data['Cy_beta_TO']*beta + adf_data['Cy_delta_r_TO']*delta_r)
-        eq6 = Nt + 0.5*rho*V**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta_TO']*beta + adf_data['Cn_delta_r_TO']*delta_r)
+        eq2 = Ft_y + 0.5*rho*V**2*adf_data['S']*(adf_data['Cy_beta_TO']*beta + adf_data['Cy_delta_r_TO']*delta_r_max)
+        eq6 = Nt + 0.5*rho*V**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta_TO']*beta + adf_data['Cn_delta_r_TO']*delta_r_max)
 
         return [eq2, eq6]
 
     ini_aprox = [Vsr, 0.]
-    V_ini, beta_ini = fsolve(equations_aprox, ini_aprox)
+    VMCG_ini, beta_ini = fsolve(equations_aprox, ini_aprox)
 
     # Final system (with LG effect)
-    # x = [V, beta, K_lg, W]
+    # x = [VMCG, beta, K_lg, W]
     def equations(var):
         x = var
 
-        eq2 = Ft_y + 0.5*rho*x[0]**2*adf_data['S']*(adf_data['Cy_beta_TO']*x[1] + adf_data['Cy_delta_r_TO']*delta_r) + x[2]*x[1]*sum(x[3+i] for i in range(n_lg))
+        eq2 = Ft_y + 0.5*rho*x[0]**2*adf_data['S']*(adf_data['Cy_beta_TO']*x[1] + adf_data['Cy_delta_r_TO']*delta_r_max) + x[2]*x[1]*sum(x[3+i] for i in range(n_lg))
         eq3 = Ft_z + adf_data['TOW_min']*g + 0.5*rho*x[0]**2*adf_data['S']*adf_data['Cz_0_TO'] + sum(x[3+i] for i in range(n_lg))
-        eq4 = Lt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cl_beta_TO']*x[1] + adf_data['Cl_delta_r_TO']*delta_r) + sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) - x[2]*x[1]*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
+        eq4 = Lt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cl_beta_TO']*x[1] + adf_data['Cl_delta_r_TO']*delta_r_max) + sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) - x[2]*x[1]*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
         eq5 = Mt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['c']*adf_data['Cm_0_TO'] - sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg)) + adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_z'][i] for i in range(n_lg))
-        eq6 = Nt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta_TO']*x[1] + adf_data['Cn_delta_r_TO']*delta_r) - adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) + x[2]*x[1]*sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg))
+        eq6 = Nt + 0.5*rho*x[0]**2*adf_data['S']*adf_data['b']*(adf_data['Cn_beta_TO']*x[1] + adf_data['Cn_delta_r_TO']*delta_r_max) - adf_data['mu_gr']*sum(x[3+i]*adf_data['lg_y'][i] for i in range(n_lg)) + x[2]*x[1]*sum(x[3+i]*adf_data['lg_x'][i] for i in range(n_lg))
         eq7 = -x[2] + 2369.074348*abs(x[1])**5 - 1268.0219021*abs(x[1])**4 + 24.6344543*abs(x[1])**3 + 3.1599044*abs(x[1])**2 + 5.2489678*abs(x[1]) + 0.0086458
 
         return [eq2, eq3, eq4, eq5, eq6, eq7]
@@ -843,41 +789,45 @@ def calculate_vmcg(adf_data):
     ini    = np.empty(3 + n_lg)
     ini[:] = np.nan
 
-    ini[0]  = V_ini
+    ini[0]  = VMCG_ini
     ini[1]  = beta_ini
     ini[2]  = 2369.074348*abs(beta_ini)**5 - 1268.0219021*abs(beta_ini)**4 + 24.6344543*abs(beta_ini)**3 + 3.1599044*abs(beta_ini)**2 + 5.2489678*abs(beta_ini) + 0.0086458
-    ini[3:] = [-(adf_data['TOW_min']*g+0.5*rho*V_ini**2*adf_data['S']*adf_data['Cz_0_TO'])/n_lg for i in range(n_lg)]
+    ini[3:] = [-(adf_data['TOW_min']*g+0.5*rho*VMCG_ini**2*adf_data['S']*adf_data['Cz_0_TO'])/n_lg for i in range(n_lg)]
     
     x = fsolve(equations, ini)
     
-    V = x[0]/kt_to_ms
+    VMCG = x[0]/kt_to_ms
     beta = np.degrees(x[1])
     K_lg = x[2]
     W = x[3:]
 
-    return V
+    return VMCG
 
 def calculate_vmca(adf_data, input_data):
-    """
-    For a right engine failure must be:
-    (phi      [deg]) Fixed Negative for right engine failure
-    (delta_r  [deg]) Negative for right engine failure
-    (delta_a  [deg]) Negative for right engine failure
-    OUTPUTS:
-    VMCA vs WEIGHT RANGE TABLE
-    VMCA FOR m WEIGHT PREDEFINED VALUE
+    """Function to calculate the minimum control speed in the air (VMCA)
+    For the Take-off thrust at SL and ISA conditions
+
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+        input_data (dict): Dictionary with the input file variables.
+
+    Returns:
+        VMCA (float): Minimum control speed in the air for each weight (kg / kt).
+        VMCA_m (float): Minimum control speed in the air for the current weight (kt).
     """
 
     # Check that take-off condition exists
     if adf_data['TO_condition'] == 0:
-        return ['None']*3
+        return ['None']*2
+
+    # Regulation conditions
+    fixed_phi = -5.0 # Negative due to right engine failure
 
     # Variable definition
-    rho = get_density(0)
+    rho = Atmos.get_density(0.0, 0.0)
     di  = 2.0
     Cd_eng  = (0.1934*(di**2.0))/adf_data['S']
-    fixed_phi = -5.0
-
+    
     beta          = []
     delta_a       = []
     delta_r       = []
@@ -885,6 +835,10 @@ def calculate_vmca(adf_data, input_data):
     weight_vector = []
     VMCA          = []
     VMCA_m        = []
+    
+    # Control limit
+    delta_a_max = -np.radians(adf_data['delta_a_max']) # Negative due to right engine failure
+    delta_r_max = -np.radians(adf_data['delta_r_max']) # Negative due to right engine failure
     
     # Propulsion
     critical_eng = get_critical_engine(adf_data)
@@ -898,13 +852,9 @@ def calculate_vmca(adf_data, input_data):
     Nt   = sum(adf_data['TOGA'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
              math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in operative_eng)
 
-    # Control limit
-    delta_a_max = -np.radians(adf_data['delta_a_max'])
-    delta_r_max = -np.radians(adf_data['delta_r_max'])
-
     # Beta, VMCA_cross and W_cross for delta_a_max and delta_r_max   (1)
-    A = np.array([[adf_data['Cl_beta_TO'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
-                  [adf_data['Cn_beta_TO'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+    A = np.array([[adf_data['Cl_beta_TO'], Lt / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                  [adf_data['Cn_beta_TO'], Nt / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
 
     b = np.array([[-adf_data['Cl_delta_r_TO'] * delta_r_max - adf_data['Cl_delta_a_TO'] * delta_a_max],
                   [-adf_data['Cn_delta_r_TO'] * delta_r_max - adf_data['Cn_delta_a_TO'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
@@ -927,8 +877,8 @@ def calculate_vmca(adf_data, input_data):
     for W in np.arange(adf_data['TOW_min'], adf_data['TOW_max'] + 1, adf_data['dW']):
         if W < Wcross: # delta_r_max
             A = np.array([[adf_data['Cy_beta_TO'], adf_data['Cy_delta_a_TO'], (W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S'])],
-                          [adf_data['Cl_beta_TO'], adf_data['Cl_delta_a_TO'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
-                          [adf_data['Cn_beta_TO'], adf_data['Cn_delta_a_TO'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+                          [adf_data['Cl_beta_TO'], adf_data['Cl_delta_a_TO'], Lt / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta_TO'], adf_data['Cn_delta_a_TO'], Nt / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
 
             b = np.array([[-adf_data['Cy_delta_r_TO'] * delta_r_max],
                           [-adf_data['Cl_delta_r_TO'] * delta_r_max],
@@ -944,8 +894,8 @@ def calculate_vmca(adf_data, input_data):
 
         if W > Wcross: # delta_a_max
             A = np.array([[adf_data['Cy_beta_TO'], adf_data['Cy_delta_r_TO'], ((W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S']))],
-                          [adf_data['Cl_beta_TO'], adf_data['Cl_delta_r_TO'], (Lt) / (0.5 * rho * adf_data['S'] * adf_data['b'])],
-                          [adf_data['Cn_beta_TO'], adf_data['Cn_delta_r_TO'], (Nt) / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+                          [adf_data['Cl_beta_TO'], adf_data['Cl_delta_r_TO'], Lt / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta_TO'], adf_data['Cn_delta_r_TO'], Nt / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
 
             b = np.array([[-adf_data['Cy_delta_a_TO'] * delta_a_max],
                           [-adf_data['Cl_delta_a_TO'] * delta_a_max],
@@ -971,11 +921,11 @@ def calculate_vmca(adf_data, input_data):
     f       = interp1d(weight_vector, VMCA)
     VMCA_m  = f(adf_data['m'])
 
-    # Calculate Vsr
+    # Calculate VSR
     Vsr  = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max_TO'])/kt_to_ms for W in weight_vector]
     KVsr = np.multiply(Vsr, 1.13)
 
-    # Plot Vmca and 1.13Vsr for each weight
+    # Plot VMCA and 1.13Vsr for each weight
     if input_data['plot'] == 1: 
         height_in = 11.69
         width_in  = 8.27
@@ -1002,19 +952,172 @@ def calculate_vmca(adf_data, input_data):
 
         fig.tight_layout()
         fig.savefig(fig_name)
+    
+    # Merge weight, VMCA and 1.13VSR in one variable
+    VMCA = [weight_vector, VMCA, KVsr]
    
-    return weight_vector, VMCA, VMCA_m
+    return VMCA, VMCA_m
 
-def write_output_file(out_data, input_data):
-    """ 
-    This function writes an output file
-    ​
-    Inputs: 
-    out_data: dictionary with the variables already calculated
-    ​
-    Outputs:
-    output_file: file with the calculated values
-    ​
+def calculate_vmcl(adf_data, input_data):
+    """Function to calculate the minimum control speed during aproach and langing (VMCL)
+    For the Go-around thrust at SL and ISA conditions
+
+    Args:
+        adf_data (dict): Dictionary with the aircraft data for the selected condition.
+        input_data (dict): Dictionary with the input file variables.
+
+    Returns:
+        VMCL (float): Minimum control speed during aproach and langing for each weight (kg / kt).
+        VMCL_m (float): Minimum control speed during aproach and langing for the current weight (kt).
+    """
+
+    # Check that take-off condition exists
+    if adf_data['LD_condition'] == 0:
+        return ['None']*2
+
+    # Regulation conditions
+    fixed_phi = -5.0 # Negative due to right engine failure
+
+    # Variable definition
+    rho = Atmos.get_density(0.0, 0.0)
+    di  = 2.0
+    Cd_eng  = (0.1934*(di**2.0))/adf_data['S']
+
+    beta          = []
+    delta_a       = []
+    delta_r       = []
+
+    weight_vector = []
+    VMCL          = []
+    VMCL_m        = []
+
+    # Control limit
+    delta_a_max = -np.radians(adf_data['delta_a_max']) # Negative due to right engine failure
+    delta_r_max = -np.radians(adf_data['delta_r_max']) # Negative due to right engine failure
+
+    # Propulsion
+    critical_eng = get_critical_engine(adf_data)
+    operative_eng = [eng for eng in range(adf_data['n_eng']) if eng != critical_eng]
+    
+    Ft_y = sum(adf_data['TOGA'][i] * math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) for i in operative_eng)
+
+    Lt   = sum(adf_data['TOGA'][i] * (math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_z'][i] +
+             math.sin(np.radians(adf_data['epsilon'][i])) * adf_data['eng_y'][i]) for i in operative_eng)
+
+    Nt   = sum(adf_data['TOGA'][i] * (- math.cos(np.radians(adf_data['epsilon'][i])) * math.cos(np.radians(adf_data['ni'][i])) * adf_data['eng_y'][i] +
+             math.cos(np.radians(adf_data['epsilon'][i])) * math.sin(np.radians(adf_data['ni'][i])) * adf_data['eng_x'][i]) for i in operative_eng)
+
+    # Beta, VMCL_cross and W_cross for delta_a_max and delta_r_max   (1)
+    A = np.array([[adf_data['Cl_beta_LD'], Lt / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                  [adf_data['Cn_beta_LD'], Nt / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+    b = np.array([[-adf_data['Cl_delta_r_LD'] * delta_r_max - adf_data['Cl_delta_a_LD'] * delta_a_max],
+                  [-adf_data['Cn_delta_r_LD'] * delta_r_max - adf_data['Cn_delta_a_LD'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+    X = np.linalg.solve(A,b)
+
+    betacross     = np.degrees(X[0])
+    VMCLcross     = ((X[1])**(-0.5))/kt_to_ms
+    Cy            = (adf_data['Cy_beta_LD'] * X[0] + adf_data['Cy_delta_a_LD'] * delta_a_max + adf_data['Cy_delta_r_LD'] * delta_r_max)
+    Wcross        = -(Ft_y + 0.5 * rho * X[1]**(-1) * adf_data['S'] * Cy) / (g * math.sin(np.radians(fixed_phi)))
+
+    if adf_data['LW_min'] <= Wcross <= adf_data['LW_max']:
+        weight_vector = np.append(weight_vector, Wcross)
+        VMCL          = np.append(VMCL, VMCLcross)
+        beta          = np.append(beta, betacross)
+        delta_a       = np.append(delta_a, np.degrees(delta_a_max))
+        delta_r       = np.append(delta_r, np.degrees(delta_r_max))
+
+    # VMCL for a given weight delta_r_max or delta_a_max
+    for W in np.arange(adf_data['LW_min'], adf_data['LW_max'] + 1, adf_data['dW']):
+        if W < Wcross: # delta_r_max
+            A = np.array([[adf_data['Cy_beta_LD'], adf_data['Cy_delta_a_LD'], (W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S'])],
+                          [adf_data['Cl_beta_LD'], adf_data['Cl_delta_a_LD'], Lt / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta_LD'], adf_data['Cn_delta_a_LD'], Nt / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+            b = np.array([[-adf_data['Cy_delta_r_LD'] * delta_r_max],
+                          [-adf_data['Cl_delta_r_LD'] * delta_r_max],
+                          [-adf_data['Cn_delta_r_LD'] * delta_r_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+            X = np.linalg.solve(A,b)
+            
+            weight_vector = np.append(weight_vector, W)
+            VMCL          = np.append(VMCL, ((X[2])**(-0.5))/kt_to_ms)
+            beta          = np.append(beta, np.degrees(X[0]))
+            delta_a       = np.append(delta_a, np.degrees(X[1]))
+            delta_r       = np.append(delta_r, np.degrees(delta_r_max))
+
+        if W > Wcross: # delta_a_max
+            A = np.array([[adf_data['Cy_beta_LD'], adf_data['Cy_delta_r_LD'], ((W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S']))],
+                          [adf_data['Cl_beta_LD'], adf_data['Cl_delta_r_LD'], Lt / (0.5 * rho * adf_data['S'] * adf_data['b'])],
+                          [adf_data['Cn_beta_LD'], adf_data['Cn_delta_r_LD'], Nt / (0.5 * rho * adf_data['S'] * adf_data['b'])]])
+
+            b = np.array([[-adf_data['Cy_delta_a_LD'] * delta_a_max],
+                          [-adf_data['Cl_delta_a_LD'] * delta_a_max],
+                          [-adf_data['Cn_delta_a_LD'] * delta_a_max - (Cd_eng * adf_data['eng_y'][critical_eng] / adf_data['b'])]])
+
+            X = np.linalg.solve(A,b)
+
+            weight_vector = np.append(weight_vector, W)
+            VMCL          = np.append(VMCL, ((X[2])**(-0.5))/kt_to_ms)
+            beta          = np.append(beta, np.degrees(X[0]))
+            delta_a       = np.append(delta_a, np.degrees(delta_a_max))
+            delta_r       = np.append(delta_r, np.degrees(X[1]))
+
+    # Sort vectors by weight
+    ind           = np.argsort(weight_vector)
+    weight_vector = weight_vector[ind]
+    VMCL          = VMCL[ind]
+    beta          = beta[ind]
+    delta_a       = delta_a[ind]
+    delta_r       = delta_r[ind]
+
+    # VMCL for given initial weight (m) (4)
+    f       = interp1d(weight_vector, VMCL)
+    VMCL_m  = f(adf_data['m'])
+
+    # Plot VMCL for each weight
+    if input_data['plot'] == 1: 
+        height_in = 11.69
+        width_in  = 8.27
+        font_size = 15  
+
+        fig_name = out_data['file'][:-4] + '_VMCL.png'
+        xl  = 'Weight (kg)'
+        yl  = 'Speed (kt)'
+        tit = '$V_{MCL}$'
+
+        fig, ax1 = plt.subplots(figsize=(height_in, width_in))
+        ax1.plot(weight_vector, VMCL, color = 'tab:blue', label = '$V_{MCL}$')
+
+        ax1.set_xlabel(xl, fontsize=font_size)
+        ax1.set_ylabel(yl, fontsize=font_size)
+        ax1.set_title(tit, fontsize=font_size)
+        
+        ax1.grid(b=True, which='major', color='#666666', linestyle='-')
+        ax1.minorticks_on()
+        ax1.grid(b=True, which='minor', color='#999999', linestyle='-', alpha=0.5)
+        ax1.tick_params(labelsize=font_size)
+        ax1.legend(loc='best')
+
+        fig.tight_layout()
+        fig.savefig(fig_name)
+   
+    
+    # Merge weight and VMCL in one variable
+    VMCL = [weight_vector, VMCL]
+
+    return VMCL, VMCL_m
+
+def write_output_file(out_data, input_data, adf_data, aircraft_config):
+    """Function to write the calculated results in an output file
+
+    Args:
+        out_data (dict): Dictionary with the output data.
+        input_data (dict): Dictionary with the input file variables.
+
+    Returns:
+        Output file with the calculated results
     """
     
     lines = '*' * 80 + '\n'
@@ -1025,22 +1128,17 @@ def write_output_file(out_data, input_data):
         
         # AIRCRAFT AND CONDITIONS
         f.write(' Aircraft     : ' + input_data['aircraft'] + '\n')
-        # variable = ['Fuselage', 'Wing', 'Tail', 'Prop_dist', 'Prop_tip', 'Prop_tail','Air_inlet', 'Canard']
-        # string = [' Configuration: ']
-        # for var in variable:
-        #     string.append(var + ': ' + aircraft_config[var] + ' | ')
-        # string = ''.join(string) + '\n'
-        # f.write(string)
         f.write(' Configuration: ' + '\n')
         variable = ['Fuselage', 'Wing', 'Tail', 'Prop_dist', 'Prop_tip', 'Prop_tail','Air_inlet', 'Canard']
         for var in variable:
             f.write(' '*5 + '{:<9s}'.format(var) + ': ' + aircraft_config[var] + '\n')
         f.write(' Condition    : ' + '{:.0f}'.format(input_data['condition']) + '\n')
-        f.write(' Altitude     : ' + '{:.1f}'.format(out_data['altitude']) + ' ft\n')
-        if out_data['speed'] < 5.0:
-            f.write(' Speed        : M' + '{:.2f}'.format(out_data['speed']) + '\n')
+        f.write(' ISA          : ' + '{:.1f}'.format(adf_data['ISA']) + '\n')
+        f.write(' Altitude     : ' + '{:.1f}'.format(adf_data['altitude']) + ' ft\n')
+        if adf_data['speed'] < 5.0:
+            f.write(' Mach         : ' + '{:.2f}'.format(adf_data['Mach']) + '\n')
         else:
-            f.write(' Speed        : ' + '{:.1f}'.format(out_data['speed']) + ' kt\n')
+            f.write(' KCAS         : ' + '{:.1f}'.format(adf_data['KCAS']) + ' kt\n')
         
         f.write('\n')
         
@@ -1224,6 +1322,9 @@ def write_output_file(out_data, input_data):
             f.write('{:^80s}'.format('MINIMUM SPEEDS') + '\n')
             f.write(lines)
 
+            # Values for current weight
+            f.write('Values for current weight\n')
+
             # VSR
             f.write('{:>11s}'.format('VSR :') + '{:8.3f}'.format(out_data['Vsr']/kt_to_ms) + ' kt\n')
 
@@ -1238,11 +1339,19 @@ def write_output_file(out_data, input_data):
                 f.write('      VMCA not caclculated: There is no data for take-off condition\n')
             else:
                 f.write('{:>11s}'.format('VMCA :') + '{:8.3f}'.format(out_data['VMCA_m']) + ' kt\n')
-                f.write('\n')
+            
+            # VMCL
+            if adf_data['LD_condition'] == 0:
+                f.write('      VMCL not caclculated: There is no data for landing condition\n')
+            else:
+                f.write('{:>11s}'.format('VMCL :') + '{:8.3f}'.format(out_data['VMCL_m']) + ' kt\n')
 
-                header   = [        'Weight', 'VMCA']
-                units    = [            'kg',   'kt']
-                variable = [ 'weight_vector', 'VMCA']
+            f.write('\n')
+
+            # VMCA table
+            if adf_data['TO_condition'] != 0:
+                header   = ['Weight', 'VMCA', '1.13VSR']
+                units    = [    'kg',   'kt',       '-']
 
                 f.write('VMCA vs weight:\n')
 
@@ -1257,13 +1366,48 @@ def write_output_file(out_data, input_data):
                 f.write(string)
 
                 # Line
-                string = '    ' + '-' * (11 * len(header) - 4) + '\n'
+                string = ' ' + '-' * (11 * len(header) - 1) + '\n'
                 f.write(string)
 
                 # Variables
-                for i in range(len(out_data['weight_vector'])):
-                    string = out_data[variable[0]][i]
-                    string = np.append(string, [out_data[var][i] for var in variable[1:]])
+                n_row = len(out_data['VMCA'][0])
+                n_col = len(out_data['VMCA'])
+                for row in range(n_row):
+                    string = []
+                    string = np.append(string, [out_data['VMCA'][col][row] for col in range(n_col)])
+                    string = ['{:>11.3f}'.format(s) for s in string]
+                    string = ''.join(string) + '\n'
+                    f.write(string) 
+
+                f.write('\n')
+
+            # VMCL table
+            if adf_data['LD_condition'] != 0:
+                header   = [        'Weight', 'VMCL']
+                units    = [            'kg',   'kt']
+
+                f.write('VMCL vs weight:\n')
+
+                # Header
+                string = ['{:>11s}'.format(s) for s in header]
+                string = ''.join(string) + '\n'
+                f.write(string)
+
+                # Units
+                string = ['{:>11s}'.format(s) for s in units]
+                string = ''.join(string) + '\n'
+                f.write(string)
+
+                # Line
+                string = ' ' + '-' * (11 * len(header) - 1) + '\n'
+                f.write(string)
+
+                # Variables
+                n_row = len(out_data['VMCL'][0])
+                n_col = len(out_data['VMCL'])
+                for row in range(n_row):
+                    string = []
+                    string = np.append(string, [out_data['VMCL'][col][row] for col in range(n_col)])
                     string = ['{:>11.3f}'.format(s) for s in string]
                     string = ''.join(string) + '\n'
                     f.write(string) 
@@ -1282,7 +1426,6 @@ MAIN PROGRAM
      g: Acceleration of gravity
 
 """
-
 feet_to_meters = 0.3048
 kt_to_ms       = 0.514444
 g              = 9.80665
@@ -1298,11 +1441,12 @@ file = './input_file_template.dat'
 # Read input and aircraft data
 input_data, adf_data, aircraft_config = read_input_file(file)
 
+# Calculate atmosphere for the study conditions
+atmos = Atmos(feet_to_meters*adf_data['altitude'], adf_data['ISA'], 1)
+
 # Initialize output dictionary
 out_data = {}
 out_data['file']     = file[:-4] + '.out'
-out_data['altitude'] = adf_data['altitude']
-out_data['speed']    = adf_data['speed']
 
 # CALCULATE
 # Static - longitudinal
@@ -1323,9 +1467,10 @@ if input_data['type'] == 4 or input_data['type'] == 0:
 
 # Minimum  speeds
 if input_data['type'] == 5 or input_data['type'] == 0: 
-    out_data['Vsr']  = get_stall_speed(adf_data['m'], get_density(adf_data['altitude']*feet_to_meters), adf_data['S'], adf_data['CL_max'])
+    out_data['Vsr']  = get_stall_speed(adf_data['m'], atmos.density, adf_data['S'], adf_data['CL_max'])
     out_data['VMCG'] = calculate_vmcg(adf_data)
-    out_data['weight_vector'], out_data['VMCA'], out_data['VMCA_m'] = calculate_vmca(adf_data, input_data)
+    out_data['VMCA'], out_data['VMCA_m'] = calculate_vmca(adf_data, input_data)
+    out_data['VMCL'], out_data['VMCL_m'] = calculate_vmcl(adf_data, input_data)
       
 # PRINT RESULTS   
-write_output_file(out_data, input_data)
+write_output_file(out_data, input_data, adf_data, aircraft_config)
