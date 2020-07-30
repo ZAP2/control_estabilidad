@@ -739,7 +739,9 @@ def calculate_vmcg(adf_data):
         return
 
     # Variable definition
-    rho = Atmos.get_density(0.0, 0.0)
+    altitude = 0.0
+    ISA = 0.0
+    rho = Atmos.get_density(altitude, ISA)
     n_lg = len(adf_data['lg_x'])
     Vsr = get_stall_speed(adf_data['TOW_min'], rho, adf_data['S'], adf_data['CL_max_TO'])
 
@@ -796,7 +798,7 @@ def calculate_vmcg(adf_data):
     
     x = fsolve(equations, ini)
     
-    VMCG = x[0]/kt_to_ms
+    VMCG = Speed.tas_to_cas(x[0], altitude, ISA)/kt_to_ms
     beta = np.degrees(x[1])
     K_lg = x[2]
     W = x[3:]
@@ -824,7 +826,9 @@ def calculate_vmca(adf_data, input_data):
     fixed_phi = -5.0 # Negative due to right engine failure
 
     # Variable definition
-    rho = Atmos.get_density(0.0, 0.0)
+    altitude = 0.0
+    ISA = 0.0
+    rho = Atmos.get_density(altitude, ISA)
     di  = 2.0
     Cd_eng  = (0.1934*(di**2.0))/adf_data['S']
     
@@ -862,7 +866,7 @@ def calculate_vmca(adf_data, input_data):
     X = np.linalg.solve(A,b)
 
     betacross     = np.degrees(X[0])
-    VMCAcross     = ((X[1])**(-0.5))/kt_to_ms
+    VMCAcross     = ((X[1])**(-0.5))
     Cy            = (adf_data['Cy_beta_TO'] * X[0] + adf_data['Cy_delta_a_TO'] * delta_a_max + adf_data['Cy_delta_r_TO'] * delta_r_max)
     Wcross        = -(Ft_y + 0.5 * rho * X[1]**(-1) * adf_data['S'] * Cy) / (g * math.sin(np.radians(fixed_phi)))
 
@@ -890,7 +894,7 @@ def calculate_vmca(adf_data, input_data):
             beta          = np.append(beta, np.degrees(X[0]))
             delta_a       = np.append(delta_a, np.degrees(X[1]))
             delta_r       = np.append(delta_r, np.degrees(delta_r_max))
-            VMCA          = np.append(VMCA, ((X[2])**(-0.5))/kt_to_ms)
+            VMCA          = np.append(VMCA, ((X[2])**(-0.5)))
 
         if W > Wcross: # delta_a_max
             A = np.array([[adf_data['Cy_beta_TO'], adf_data['Cy_delta_r_TO'], ((W * g * math.sin(np.radians(fixed_phi)) + Ft_y) / (0.5 * rho * adf_data['S']))],
@@ -907,7 +911,7 @@ def calculate_vmca(adf_data, input_data):
             beta          = np.append(beta, np.degrees(X[0]))
             delta_a       = np.append(delta_a, np.degrees(delta_a_max))
             delta_r       = np.append(delta_r, np.degrees(X[1]))
-            VMCA          = np.append(VMCA, ((X[2])**(-0.5))/kt_to_ms)
+            VMCA          = np.append(VMCA, ((X[2])**(-0.5)))
     
     # Sort vectors by weight
     ind           = np.argsort(weight_vector)
@@ -917,12 +921,16 @@ def calculate_vmca(adf_data, input_data):
     delta_a       = delta_a[ind]
     delta_r       = delta_r[ind]
 
+    # Convert VMCA from TAS to KCAS
+    for i in range(len(VMCA)):
+        VMCA[i] = Speed.tas_to_cas(VMCA[i], altitude, ISA)/kt_to_ms 
+
     # VMCA for given initial weight (m) (4)
     f       = interp1d(weight_vector, VMCA)
     VMCA_m  = f(adf_data['m'])
 
     # Calculate VSR
-    Vsr  = [get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max_TO'])/kt_to_ms for W in weight_vector]
+    Vsr  = [Speed.tas_to_cas(get_stall_speed(W, rho, adf_data['S'], adf_data['CL_max_TO']), altitude, ISA)/kt_to_ms for W in weight_vector]
     KVsr = np.multiply(Vsr, 1.13)
 
     # Plot VMCA and 1.13Vsr for each weight
@@ -979,7 +987,9 @@ def calculate_vmcl(adf_data, input_data):
     fixed_phi = -5.0 # Negative due to right engine failure
 
     # Variable definition
-    rho = Atmos.get_density(0.0, 0.0)
+    altitude = 0.0
+    ISA = 0.0
+    rho = Atmos.get_density(altitude, ISA)
     di  = 2.0
     Cd_eng  = (0.1934*(di**2.0))/adf_data['S']
 
@@ -1017,7 +1027,7 @@ def calculate_vmcl(adf_data, input_data):
     X = np.linalg.solve(A,b)
 
     betacross     = np.degrees(X[0])
-    VMCLcross     = ((X[1])**(-0.5))/kt_to_ms
+    VMCLcross     = ((X[1])**(-0.5))
     Cy            = (adf_data['Cy_beta_LD'] * X[0] + adf_data['Cy_delta_a_LD'] * delta_a_max + adf_data['Cy_delta_r_LD'] * delta_r_max)
     Wcross        = -(Ft_y + 0.5 * rho * X[1]**(-1) * adf_data['S'] * Cy) / (g * math.sin(np.radians(fixed_phi)))
 
@@ -1042,7 +1052,7 @@ def calculate_vmcl(adf_data, input_data):
             X = np.linalg.solve(A,b)
             
             weight_vector = np.append(weight_vector, W)
-            VMCL          = np.append(VMCL, ((X[2])**(-0.5))/kt_to_ms)
+            VMCL          = np.append(VMCL, ((X[2])**(-0.5)))
             beta          = np.append(beta, np.degrees(X[0]))
             delta_a       = np.append(delta_a, np.degrees(X[1]))
             delta_r       = np.append(delta_r, np.degrees(delta_r_max))
@@ -1059,7 +1069,7 @@ def calculate_vmcl(adf_data, input_data):
             X = np.linalg.solve(A,b)
 
             weight_vector = np.append(weight_vector, W)
-            VMCL          = np.append(VMCL, ((X[2])**(-0.5))/kt_to_ms)
+            VMCL          = np.append(VMCL, ((X[2])**(-0.5)))
             beta          = np.append(beta, np.degrees(X[0]))
             delta_a       = np.append(delta_a, np.degrees(delta_a_max))
             delta_r       = np.append(delta_r, np.degrees(X[1]))
@@ -1071,6 +1081,10 @@ def calculate_vmcl(adf_data, input_data):
     beta          = beta[ind]
     delta_a       = delta_a[ind]
     delta_r       = delta_r[ind]
+
+    # Convert VMCL from TAS to KCAS
+    for i in range(len(VMCL)):
+        VMCL[i] = Speed.tas_to_cas(VMCL[i], altitude, ISA)/kt_to_ms 
 
     # VMCL for given initial weight (m) (4)
     f       = interp1d(weight_vector, VMCL)
