@@ -7,20 +7,21 @@
 ######################################################################
 #                        AIRCRAFT DESCRIPTION                        #
 #                                                                    #
-#              AA : Fuselage code                                    #
-#              BB : Wing code                                        #
-#              CC : Tail code                                        #
+#               A : Fuselage code                                    #
+#               B : Wing code                                        #
+#               C : Tail code                                        #
 #             DDD : Propulsion code                                  #
-#              EE : Air inlet code                                   #
-#              FF : Canard code                                      # 
-#               R : Comment for revised configuration (optional)     #
+#               E : Air inlet code                                   #
+#               F : Canard code                                      # 
+#               V : Configuration version (optional)                 #
 
-               AA : 00
-               BB : 00
-               CC : 00
+                A : 0
+                B : 0
+                C : 0
               DDD : 000
-               EE : 00
-               FF : 00
+                E : 0
+                F : 0
+				V : 1.0
 
 
 ######################################################################
@@ -32,12 +33,13 @@
 #    LD_condition : Position of the defined landing condition        #
 #                   (0 if there is no landing condition)             #
 #                                                                    #
+#             ISA : Temperature deviation from ISA (K)               #
 #        altitude : Flight altitude (ft)                             #
 #           speed : Speed (Mach / KTAS)                              #
 
      n_conditions : 2
      TO_condition : 1
-     LD_condition : 1
+     LD_condition : 0
 
 #                     LS       HS
 #                  -------- --------
@@ -48,18 +50,48 @@
 ######################################################################
 #                              GEOMETRY                              #
 #                                                                    #
-#         TOW_min : Minimum take-off weight (kg)                     #
-#         TOW_max : Maximum take-off_weight (kg)                     #
-#          LW_min : Minimum landing weight (kg)                      #
-#          LW_max : Maximum landing weight (kg)                      #
-#              dW : Weight increment for VMC calculations            #
+#               S : Wing surface (m2)                                #
+#               c : Mean aerodynamic chord (m)                       #
+#               b : Wingspan (m)                                     #
 #                                                                    #
 #     delta_a_max : Maximum aileron deflection (deg)                 #
 #     delta_r_max : Maximum rudder deflection  (deg)                 #
 #                                                                    #
-#               S : Wing surface (m2)                                #
-#               c : Mean aerodynamic chord (m)                       #
-#               b : Wingspan (m)                                     #
+
+                S : 511.0
+                c : 8.324
+                b : 59.64
+
+      delta_e_max : 30
+      delta_a_max : 30
+      delta_r_max : 30
+
+######################################################################
+#                           LANDING GEAR                             #
+#                                                                    #
+#   Note: Landing gear positions are numbered from front to back     #
+#   and from left to right from the point of view of the pilot       #
+#   looking forward                                                  #
+#            lg_x : X distance to the CG (m)                         #
+#            lg_y : Y distance to the CG (m)                         #
+#            lg_z : Z distance to the CG (m)                         #
+#                                                                    #
+#           mu_gr : Rolling friction coefficient (-)                 #
+
+             lg_x : 14.25, -11.35, -11.35
+             lg_y :  0.00,  -5.50,   5.50
+             lg_z :  4.89,   4.89,   4.89 
+
+            mu_gr : 0.025
+
+######################################################################
+#                          MASS PROPERTIES                           #
+#                                                                    #
+#         TOW_min : Minimum take-off weight (kg)                     #
+#         TOW_max : Maximum take-off weight (kg)                     #
+#          LW_min : Minimum landing weight (kg)                      #
+#          LW_max : Maximum landing weight (kg)                      #
+#              dW : Weight step for VMC calculations                 #
 #                                                                    #
 #               m : Current weight (kg)                              #
 #                                                                    #
@@ -74,13 +106,6 @@
            LW_min : 195000.0
            LW_max : 295000.0
                dW :  10000.0
-
-      delta_a_max : 30
-      delta_r_max : 30
-
-                S : 511.0
-                c : 8.324
-                b : 59.64
 
 #                       LS         HS
 #                  ----------- -----------
@@ -115,25 +140,7 @@
 
              TOGA : 243500.0, 243500.0, 243500.0, 243500.0
                T1 :  57763.8,  57763.8,  57763.8,  57763.8
-               T2 :  44550.0,  44550.0,  44550.0,  44550.0
-
-######################################################################
-#                           LANDING GEAR                             #
-#                                                                    #
-#   Note: Landing gear positions are numbered from front to back      #
-#   and from left to right from the point of view of the pilot       #
-#   looking forward                                                  #
-#            lg_x : X distance to the CG (m)                         #
-#            lg_y : Y distance to the CG (m)                         #
-#            lg_z : Z distance to the CG (m)                         #
-#                                                                    #
-#           mu_gr : Rolling friction coefficient (-)                 #
-
-             lg_x : 14.25, -11.35, -11.35
-             lg_y :  0.00,  -5.50,   5.50
-             lg_z :  4.89,   4.89,   4.89 
-
-            mu_gr : 0.025 
+               T2 :  44550.0,  44550.0,  44550.0,  44550.0 
 
 ######################################################################
 #                            AERODYNAMICS                            #

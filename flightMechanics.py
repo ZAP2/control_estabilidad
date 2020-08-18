@@ -2,6 +2,7 @@
 """
    FLIGHT MECHANICS
 """
+import os
 import sys
 import math
 import numpy as np
@@ -37,7 +38,8 @@ def read_input_file(file):
     input_data = {}   
     for index, title in enumerate(variable_name):    
         if title == 'aircraft':
-            input_data[title] = variable_data[index][0]
+            file_path = os.path.split(file)
+            input_data[title] = file_path[0] + '/' + variable_data[index][0]
         elif title in ['condition', 'type', 'plot']:
             input_data[title] = np.array([int(var) for var in variable_data[index]])[0]
         else:
@@ -75,9 +77,9 @@ def read_adf_file(file, condition):
     variable_data = [line[1].replace(" ","").split(',') for line in lines]
 
     adf_data = {}
-    common_str    = ['AA', 'BB', 'CC', 'DDD', 'EE', 'FF', 'R']
+    common_str    = ['A', 'B', 'C', 'DDD', 'E', 'F', 'V']
     common_single = ['n_conditions','TO_condition', 'LD_condition',
-                     'TOW_min', 'TOW_max', 'LW_min', 'LW_max', 'dW', 'delta_a_max', 'delta_r_max',
+                     'TOW_min', 'TOW_max', 'LW_min', 'LW_max', 'dW', 'delta_e_max', 'delta_a_max', 'delta_r_max',
                      'S', 'c', 'b', 'n_eng', 'mu_gr']
     common_array  = ['TOGA', 'epsilon', 'ni', 'eng_x', 'eng_y', 'eng_z', 'lg_x', 'lg_y', 'lg_z']
     cond_filter   = ['ISA', 'altitude', 'speed', 'm', 'Ix', 'Iy', 'Iz', 'Jxz']                 
@@ -137,7 +139,6 @@ def read_aircraft_config(adf_data):
 
     """
 
-    
     aircraft_config = {}
 
     component = ['Fuselage', 'Wing', 'Tail', 'Prop_dist', 'Prop_tip', 'Prop_tail','Air_inlet', 'Canard']
@@ -149,16 +150,16 @@ def read_aircraft_config(adf_data):
               ['BLI', 'No'],                                   # Prop_tail
               ['Upper', 'Lower', 'Lateral', 'No'],             # Air_inlet
               ['Yes', 'No']]                                   # Canard
-    code   = [['01', '00'],                # Fuselage
-              ['01', '00'],                # Wing
-              ['01', '02', '03', '00'],    # Tail
-              ['1', '2', '3', '4', '0'],   # Prop_dist
-              ['1', '2', '0'],             # Prop_tip
-              ['1', '0'],                  # Prop_tail
-              ['01', '02', '03', '00'],    # Air_inlet
-              ['01', '00']]                # Canard
+    code   = [['1', '0'],                # Fuselage
+              ['1', '0'],                # Wing
+              ['1', '2', '3', '0'],      # Tail
+              ['1', '2', '3', '4', '0'], # Prop_dist
+              ['1', '2', '0'],           # Prop_tip
+              ['1', '0'],                # Prop_tail
+              ['1', '2', '3', '0'],      # Air_inlet
+              ['1', '0']]                # Canard
 
-    letter = ['AA', 'BB', 'CC', 'DDD', 'EE', 'FF']
+    letter = ['A', 'B', 'C', 'DDD', 'E', 'F']
     
     i = 0
     for let in letter:
@@ -174,8 +175,8 @@ def read_aircraft_config(adf_data):
             aircraft_config[component[i]] = option[i][code_ind]
             i += 1
 
-    if 'R' in adf_data:
-        aircraft_config['Revision'] = adf_data['R']
+    if 'V' in adf_data:
+        aircraft_config['Version'] = adf_data['V']
     
     return aircraft_config
 
@@ -266,12 +267,13 @@ def calculate_static_long(adf_data, input_data):
                   [adf_data['Cm_alpha'], adf_data['Cm_delta_e']]])
     
     """
-    B = np.array([[(adf_data['m'] * g + Ft_z) / (p_d * adf_data['S']) - adf_data['CL_0']],
+    B = np.array([[(adf_data['m'] * g + Ft_z) / (p_d * adf_data['S']) - CL_0],
                   [-Mt_y / (p_d * adf_data['S'] * adf_data['c']) -adf_data['Cm_0']]])
-    """
-    B = np.array([[(adf_data['m'] * g) / (p_d * adf_data['S']) - CL_0],
-                  [-adf_data['Cm_0']]])
+    """ 
 
+    B = np.array([[(adf_data['m'] * g) / (p_d * adf_data['S']) - CL_0],
+                  [-adf_data['Cm_0']]]) 
+    
     X = np.linalg.solve(A,B)
     
     alpha_trim   = np.degrees(X[0])[0]
@@ -380,12 +382,16 @@ def calculate_dynamic_long(adf_data, input_data):
         input_data (dict): Dictionary with the input file variables.
 
     Returns:
-        wn_ph (float): Natural frequency in phugoide mode (1/s).
-        zeta_ph (float): Dumping coefficient in phugoide mode (-).
-        lambda_ph (float): Eigenvalues in phugoide mode (-).
+        lambda_ph (float): Eigenvalues in phugoid mode (-).
+        wn_ph (float): Natural frequency in phugoid mode (1/s).
+        zeta_ph (float): Dumping coefficient in phugoid mode (-).
+        t_12_ph (float): Time constant in phugoid mode (s).
+        T_ph (float): Period of the phugoid mode (s).
+        lambda_sp (float): Natural frequency in short period mode (1/s).
         wn_sp (float): Natural frequency in short period mode (1/s).
         zeta_sp (float): Dumping coefficient in short period mode (-).
-        lambda_sp (float): Natural frequency in short period mode (1/s).
+        t_12_sp (float): Time constant in short period mode (s).
+        T_sp (float): Period of the short period mode (s).
         Control response charts
     """
 
@@ -419,6 +425,8 @@ def calculate_dynamic_long(adf_data, input_data):
     
     wn_ph   = (lambda_ph[0,0] ** 2 + lambda_ph[0,1] ** 2) ** 0.5
     zeta_ph = -lambda_ph[0,0] /((lambda_ph[0,0] ** 2 + lambda_ph[0,1] ** 2) ** 0.5)
+    t_12_ph = -0.693/lambda_ph[0,0]
+    T_ph = 2.0*math.pi / lambda_ph[0,1]
     
     #SHORT PERIOD
     lambda_sp = np.array([[L.real[ind_sp],  np.absolute(L.imag[ind_sp])],
@@ -426,6 +434,8 @@ def calculate_dynamic_long(adf_data, input_data):
     
     wn_sp   = (lambda_sp[0,0] ** 2 + lambda_sp[0,1] ** 2) ** 0.5
     zeta_sp = -lambda_sp[0,0] /((lambda_sp[0,0] ** 2 + lambda_sp[0,1] ** 2) ** 0.5)
+    t_12_sp = -0.693/lambda_sp[0,0]
+    T_sp = 2.0*math.pi / lambda_sp[0,1]
     
     """ 
     CONTROL
@@ -516,7 +526,7 @@ def calculate_dynamic_long(adf_data, input_data):
             fig.savefig(fig_name[i])
             #plt.show()
     
-    return wn_ph, zeta_ph, lambda_ph, wn_sp, zeta_sp, lambda_sp 
+    return lambda_ph, wn_ph, zeta_ph, t_12_ph, T_ph, lambda_sp, wn_sp, zeta_sp, t_12_sp, T_sp
 
 def calculate_dynamic_latdir(adf_data, input_data):
     """Function to calculate the dynamic lateral-directional stability
@@ -526,13 +536,15 @@ def calculate_dynamic_latdir(adf_data, input_data):
         input_data (dict): Dictionary with the input file variables.
 
     Returns:
-        wn_rs (float): Natural frequency in roll subsidence mode (1/s).
         lambda_rs (float): Eigenvalues in roll subsidence mode (-).
-        wn_spi (float): Natural frequency in spiral mode (1/s).
+        t_12_rs (float): Time constant in roll subsidence mode (s).
         lambda_spi (float): Eigenvalues in spiral mode (-).
+        t_12_spi (float): Time constant in spiral mode (s).
+        lambda_dr (float): Eigenvalues in dutch roll mode (-).
         wn_dr (float): Natural frequency in dutch roll mode (1/s).
         zeta_dr (float): Dumping coefficient in dutch roll mode (-).
-        lambda_dr (float): Eigenvalues in dutch roll mode (-).
+        t_12_dr (float): Time constant in dutch roll mode (s).
+        T_dr (float): Period of the dutch roll mode (s).
         Control response charts
     """
     
@@ -566,13 +578,13 @@ def calculate_dynamic_latdir(adf_data, input_data):
 
     # ROLL SUBSIDENCE
     lambda_rs = np.array([L_aux[ind_rs],  0.0])
-    
-    wn_rs   = lambda_rs[0]
+
+    t_12_rs = -0.693/lambda_rs[0]
     
     # SPIRAL
     lambda_spi = np.array([L_aux[ind_spi],  0.0])
-    
-    wn_spi   = lambda_spi[0]
+
+    t_12_spi = -0.693/lambda_spi[0]
     
     # DUTCH ROLL
     lambda_dr = np.array([[L.real[ind_dr],  np.absolute(L.imag[ind_dr])],
@@ -580,6 +592,8 @@ def calculate_dynamic_latdir(adf_data, input_data):
     
     wn_dr   = (lambda_dr[0,0] ** 2 + lambda_dr[0,1] ** 2) ** 0.5
     zeta_dr = -lambda_dr[0,0] /((lambda_dr[0,0] ** 2 + lambda_dr[0,1] ** 2) ** 0.5)
+    t_12_dr = -0.693/lambda_dr[0,0]
+    T_dr = 2.0*math.pi / lambda_dr[0,1]
     
     """ 
     CONTROL
@@ -722,7 +736,7 @@ def calculate_dynamic_latdir(adf_data, input_data):
             fig.savefig(fig_name[i])
             #plt.show()
 
-    return wn_rs, lambda_rs, wn_spi, lambda_spi, wn_dr, zeta_dr, lambda_dr
+    return lambda_rs, t_12_rs, lambda_spi, t_12_spi, lambda_dr, wn_dr, zeta_dr, t_12_dr, T_dr
 
 def calculate_vmcg(adf_data):
     """Function to calculate the minimum control speed on the ground (VMCG)
@@ -1143,16 +1157,20 @@ def write_output_file(out_data, input_data, adf_data, aircraft_config):
         # AIRCRAFT AND CONDITIONS
         f.write(' Aircraft     : ' + input_data['aircraft'] + '\n')
         f.write(' Configuration: ' + '\n')
+        
         variable = ['Fuselage', 'Wing', 'Tail', 'Prop_dist', 'Prop_tip', 'Prop_tail','Air_inlet', 'Canard']
         for var in variable:
             f.write(' '*5 + '{:<9s}'.format(var) + ': ' + aircraft_config[var] + '\n')
+        if 'Version' in aircraft_config:
+            f.write(' '*5 + '{:<9s}'.format('Version') + ': ' + aircraft_config['Version'] + '\n')
+        
         f.write(' Condition    : ' + '{:.0f}'.format(input_data['condition']) + '\n')
-        f.write(' ISA          : ' + '{:.1f}'.format(adf_data['ISA']) + '\n')
-        f.write(' Altitude     : ' + '{:.1f}'.format(adf_data['altitude']) + ' ft\n')
+        f.write('     ISA      : ' + '{:.1f}'.format(adf_data['ISA']) + '\n')
+        f.write('     Altitude : ' + '{:.1f}'.format(adf_data['altitude']) + ' ft\n')
         if adf_data['speed'] < 5.0:
-            f.write(' Mach         : ' + '{:.2f}'.format(adf_data['Mach']) + '\n')
+            f.write('     Mach     : ' + '{:.2f}'.format(adf_data['Mach']) + '\n')
         else:
-            f.write(' KCAS         : ' + '{:.1f}'.format(adf_data['KCAS']) + ' kt\n')
+            f.write('     KCAS     : ' + '{:.1f}'.format(adf_data['KCAS']) + ' kt\n')
         
         f.write('\n')
         
@@ -1278,22 +1296,26 @@ def write_output_file(out_data, input_data, adf_data, aircraft_config):
             
             # Modes
             f.write('Modes:\n')  
-            f.write('{:10.4f}'.format(out_data['lambda_ph'][0,0]) + '{:+8.4f}'.format(out_data['lambda_ph'][0,1]) + 'j\n')
-            f.write('{:10.4f}'.format(out_data['lambda_ph'][1,0]) + '{:+8.4f}'.format(out_data['lambda_ph'][1,1]) + 'j\n')
-            f.write('{:10.4f}'.format(out_data['lambda_sp'][0,0]) + '{:+8.4f}'.format(out_data['lambda_sp'][0,1]) + 'j\n')
-            f.write('{:10.4f}'.format(out_data['lambda_sp'][1,0]) + '{:+8.4f}'.format(out_data['lambda_sp'][1,1]) + 'j\n')
+            f.write('{:10.5f}'.format(out_data['lambda_ph'][0,0]) + '{:+8.5f}'.format(out_data['lambda_ph'][0,1]) + 'j\n')
+            f.write('{:10.5f}'.format(out_data['lambda_ph'][1,0]) + '{:+8.5f}'.format(out_data['lambda_ph'][1,1]) + 'j\n')
+            f.write('{:10.5f}'.format(out_data['lambda_sp'][0,0]) + '{:+8.5f}'.format(out_data['lambda_sp'][0,1]) + 'j\n')
+            f.write('{:10.5f}'.format(out_data['lambda_sp'][1,0]) + '{:+8.5f}'.format(out_data['lambda_sp'][1,1]) + 'j\n')
             f.write('\n')
             
             # Phugoid
             f.write('Phugoid:\n')
-            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_ph']) + '\n')
+            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_ph']) + ' s\n')
             f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_ph']) + '\n')
+            f.write('{:>11s}'.format('t_1/2 :') + '{:8.3f}'.format(out_data['t_12_ph']) + ' s\n')
+            f.write('{:>11s}'.format('T :') + '{:8.3f}'.format(out_data['T_ph']) + ' s\n')
             f.write('\n')
             
             # Short period
             f.write('Short period:\n')
-            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_sp']) + '\n')
+            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_sp']) + ' s\n')
             f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_sp']) + '\n')
+            f.write('{:>11s}'.format('t_1/2 :') + '{:8.3f}'.format(out_data['t_12_sp']) + ' s\n')
+            f.write('{:>11s}'.format('T :') + '{:8.3f}'.format(out_data['T_sp']) + ' s\n')
             f.write('\n')
             
             f.write('\n')
@@ -1306,26 +1328,30 @@ def write_output_file(out_data, input_data, adf_data, aircraft_config):
             
             # Modes
             f.write('Modes:\n')  
-            f.write('{:10.4f}'.format(out_data['lambda_rs'][0]) + '{:+8.4f}'.format(out_data['lambda_rs'][1]) + 'j\n')
-            f.write('{:10.4f}'.format(out_data['lambda_spi'][0]) + '{:+8.4f}'.format(out_data['lambda_spi'][1]) + 'j\n')
-            f.write('{:10.4f}'.format(out_data['lambda_dr'][0,0]) + '{:+8.4f}'.format(out_data['lambda_dr'][0,1]) + 'j\n')
-            f.write('{:10.4f}'.format(out_data['lambda_dr'][1,0]) + '{:+8.4f}'.format(out_data['lambda_dr'][1,1]) + 'j\n')
+            f.write('{:10.5f}'.format(out_data['lambda_rs'][0]) + '{:+8.5f}'.format(out_data['lambda_rs'][1]) + 'j\n')
+            f.write('{:10.5f}'.format(out_data['lambda_spi'][0]) + '{:+8.5f}'.format(out_data['lambda_spi'][1]) + 'j\n')
+            f.write('{:10.5f}'.format(out_data['lambda_dr'][0,0]) + '{:+8.5f}'.format(out_data['lambda_dr'][0,1]) + 'j\n')
+            f.write('{:10.5f}'.format(out_data['lambda_dr'][1,0]) + '{:+8.5f}'.format(out_data['lambda_dr'][1,1]) + 'j\n')
             f.write('\n')
             
             # Roll subsidence
             f.write('Roll subsidence:\n')
-            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_rs']) + '\n')
+            f.write('{:>11s}'.format('lambda :') + '{:8.5f}'.format(out_data['lambda_rs'][0]) + ' s\n')
+            f.write('{:>11s}'.format('t_1/2 :') + '{:8.3f}'.format(out_data['t_12_rs']) + ' s\n')
             f.write('\n')
             
             # Spiral
             f.write('Spiral:\n')
-            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_spi']) + '\n')
+            f.write('{:>11s}'.format('lambda :') + '{:8.5f}'.format(out_data['lambda_spi'][0]) + ' s\n')
+            f.write('{:>11s}'.format('t_1/2 :') + '{:8.3f}'.format(out_data['t_12_spi']) + ' s\n')
             f.write('\n')
             
             # Dutch roll
             f.write('Dutch roll:\n')
-            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_dr']) + '\n')
-            f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_dr']) + '\n')
+            f.write('{:>11s}'.format('wn :') + '{:8.5f}'.format(out_data['wn_dr']) + ' s\n')
+            f.write('{:>11s}'.format('zeta :') + '{:8.5f}'.format(out_data['zeta_dr']) + ' s\n')
+            f.write('{:>11s}'.format('t_1/2 :') + '{:8.3f}'.format(out_data['t_12_dr']) + ' s\n')
+            f.write('{:>11s}'.format('T :') + '{:8.3f}'.format(out_data['T_dr']) + ' s\n')
             f.write('\n')
             
             f.write('\n')
@@ -1469,15 +1495,19 @@ if input_data['type'] == 1 or input_data['type'] == 0:
             
 # Static - lateral-directional   
 if input_data['type'] == 2 or input_data['type'] == 0:
-    out_data['phi_b'], out_data['delta_a_b'], out_data['delta_r_b'], out_data['beta_p'], out_data['delta_a_p'], out_data['delta_r_p'], out_data['n_p'] = calculate_static_latdir(adf_data, input_data)
+    out_data['phi_b'], out_data['delta_a_b'], out_data['delta_r_b'], \
+    out_data['beta_p'], out_data['delta_a_p'], out_data['delta_r_p'], out_data['n_p'] = calculate_static_latdir(adf_data, input_data)
 
 # Dynamic - longitudinal 
 if input_data['type'] == 3 or input_data['type'] == 0:
-    out_data['wn_ph'], out_data['zeta_ph'], out_data['lambda_ph'], out_data['wn_sp'], out_data['zeta_sp'], out_data['lambda_sp'] = calculate_dynamic_long(adf_data, input_data)    
+    out_data['lambda_ph'], out_data['wn_ph'], out_data['zeta_ph'], out_data['t_12_ph'], out_data['T_ph'], \
+    out_data['lambda_sp'], out_data['wn_sp'], out_data['zeta_sp'], out_data['t_12_sp'], out_data['T_sp']  = calculate_dynamic_long(adf_data, input_data)    
 
 # Dynamic - longitudinal 
 if input_data['type'] == 4 or input_data['type'] == 0:
-    out_data['wn_rs'], out_data['lambda_rs'], out_data['wn_spi'], out_data['lambda_spi'], out_data['wn_dr'], out_data['zeta_dr'], out_data['lambda_dr'] = calculate_dynamic_latdir(adf_data, input_data)    
+    out_data['lambda_rs'], out_data['t_12_rs'], \
+    out_data['lambda_spi'], out_data['t_12_spi'],\
+    out_data['lambda_dr'], out_data['wn_dr'], out_data['zeta_dr'], out_data['t_12_dr'], out_data['T_dr'] = calculate_dynamic_latdir(adf_data, input_data)    
 
 # Minimum  speeds
 if input_data['type'] == 5 or input_data['type'] == 0: 
