@@ -217,6 +217,7 @@ def get_cg_parameters(adf_data):
     adf_data['CG_lg_z'] = -(adf_data['lg_z'] - adf_data['CG_z'])
 
     # Aerodynamic coefficients (Only the ones affected)
+    Cm_0 = adf_data['Cm_0'] - (adf_data['CG'] - adf_data['CG_position'])*adf_data['Cz_0']
     Cm_alpha = adf_data['Cm_alpha'] - (adf_data['CG'] - adf_data['CG_position'])*adf_data['Cz_alpha']
     Cz_q = adf_data['Cz_q'] - (adf_data['CG'] - adf_data['CG_position'])*adf_data['Cz_q']
     Cx_q = adf_data['Cx_q'] - (adf_data['CG'] - adf_data['CG_position'])*adf_data['Cx_q']
@@ -235,6 +236,7 @@ def get_cg_parameters(adf_data):
                        ((adf_data['CG'] - adf_data['CG_position'])*adf_data['c']/adf_data['b'])**2 * adf_data['Cy_r']**3/adf_data['Cn_r']
     Cn_delta_r = adf_data['Cn_delta_r'] + (adf_data['CG'] - adf_data['CG_position'])*adf_data['c']/adf_data['b'] * adf_data['Cy_delta_r']
 
+    adf_data['Cm_0'] = Cm_0
     adf_data['Cm_alpha'] = Cm_alpha
     adf_data['Cz_q'] = Cz_q
     adf_data['Cx_q'] = Cx_q
