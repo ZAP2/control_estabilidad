@@ -6,6 +6,11 @@
 #             condition : Select the number of one of the conditions #
 #                         presented in the ADF                       #
 #                                                                    #
+#                    CG : Relative position of the center of gravity #
+#                         with respect the MAC. (Optional)           #
+#                         If not defined, the CG defined in the ADF  #
+#                         is taken                                   #
+#                                                                    #
 #                  type : Type of analysis                           #
 #                         0 : Complete analysis                      #
 #                         1 : Static - Longitudinal                  #
@@ -37,8 +42,10 @@
                aircraft : adf_template.dat
 
               condition : 2
+			  
+                     CG : 0.25
 
-                   type : 0
+                   type : 1
 
                    plot : 1
 
