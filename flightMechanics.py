@@ -1261,8 +1261,8 @@ def write_output_file(out_data, input_data, adf_data, aircraft_config):
             f.write(lines)
             
             # Static margin and neutral point
-            f.write('{:>15s}'.format('Static margin :') + '{:8.3f}'.format(out_data['static_margin']) + '\n')
             f.write('{:>15s}'.format('Neutral point :') + '{:8.3f}'.format(out_data['neutral_point']) + '\n')
+            f.write('{:>15s}'.format('Static margin :') + '{:8.3f}'.format(out_data['static_margin']) + '\n')
             f.write('\n')
 
             # Trim
