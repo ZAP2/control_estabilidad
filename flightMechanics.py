@@ -192,14 +192,14 @@ def read_aircraft_config(adf_data):
     return aircraft_config
 
 def get_cg_parameters(adf_data):
-    """Function to obtain all the parameters afected by CG position
+    """Function to obtain all the parameters affected by CG position
 
     Args:
         adf_data (dict): Dictionary with the aircraft data for the selected condition.
 
     Returns:
         adf_data (dict): Dictionary with the aircraft data for the selected condition,
-                         adding parameters afected by CG position.
+                         adding parameters affected by CG position.
 
     """
 
